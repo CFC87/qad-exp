@@ -90,8 +90,12 @@ Options of `run.py`:
   symlinks leaving the directory, it is mounted alone into the server container). `--arm bf16` / `--arm nvfp4` are the
   built-in baselines. One arm name = one checkpoint, for good: results go to `eval/results/<NAME>/`.
 - `--phases S1,S2,...` (default all), `--gpus 0,1,...` (default all GPUs of the node).
-- `--shard i/n`: with two nodes, run the identical command with `--shard 0/2` on one and `--shard 1/2` on the other;
-  the jobs are split by expected time. Give each node its own API key(s), or the two nodes share one key's rate.
+- `--shard i/n`: two nodes split one job list. Run the identical command with `--shard 0/2` on one node and
+  `--shard 1/2` on the other; the jobs are split by expected time.
+  - Every checkpoint must exist on both nodes at the same path.
+  - Give each node its own API key(s), or the two nodes share one key's rate.
+  - Afterwards, copy one node's `eval/results/<arm>/` directories into the other's `eval/results/`, then run the same
+    command with `--grade-only` there to write the combined `summary.md`.
 - `--tau2-per-key N` (default 1): tau2 phases running at once per API key. Raise it only if the endpoint's rate limit
   allows N x 2-3 simultaneous conversations x 48.
 - `--grade-only`: grade what is there and write the summary, without starting servers.
@@ -148,7 +152,7 @@ IFBench fetches its NLTK data on first use; `grade_ifbench.py --selftest` re-gra
 ## Tests (CPU only)
 
 ```bash
-.venv-client/bin/python eval/tests/test_dry_run.py      # scheduler: dry run on 8 GPUs, shards, scheduling loop (needs models/Qwen3-8B)
+.venv-client/bin/python eval/tests/test_dry_run.py      # scheduler: dry run on 8 GPUs, shards, scheduling loop (after setup: models, eval data)
 ```
 
 Before release this harness was checked against the reference harness the published numbers come from, on the

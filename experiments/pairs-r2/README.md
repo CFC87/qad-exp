@@ -64,6 +64,8 @@ E=experiments/pairs-r2
 # 1. Build the PTQ student once (one GPU, ~10 min; downloads cnn_dailymail for a calibration that does not affect the result).
 python3 train/launch/chain.py $E/reas_code.toml prepare        # any pair config: same model and checkpoint
 # 2. Step 0 must equal the released checkpoint bit for bit (one GPU, ~15 min); read out/check-step0.txt.
+#    Pass: every weight, weight_scale, weight_scale_2 and input_scale identical. Only the release has k_scale /
+#    v_scale (1.0), and that is expected. Anything else: stop and report.
 python3 train/launch/chain.py $E/reas_code.toml check-step0
 # 3. Smoke tests of the launcher, about 1 hour and 15 minutes; they are not results.
 python3 train/launch/chain.py $E/smoke.toml run --layout 1node
@@ -73,9 +75,22 @@ python3 train/launch/chain.py $E/reas_code.toml run --layout 1node
 ...
 ```
 
-With two nodes, run on the training node and add `--layout 2node --peer <rollout host>`. The rollout node needs
-passwordless ssh from the training node, docker, and this repository at the same path with setup done (images, models).
+With two nodes, run on the training node and add `--layout 2node --peer <rollout host>`.
+
+The rollout node needs:
+- passwordless ssh from the training node;
+- docker;
+- this repository at the same path, with setup done (images, models).
+
 `--peer-ip` sets the address the servers are reached at, if `hostname -I` there does not give it first.
+
+Network between the nodes:
+- the rollout node's ports 8021-8028 (vLLM servers, HTTP) must be reachable from the training node;
+- the training node's port 29611 (weight-push rendezvous) and NCCL's own ports must be reachable from the rollout node,
+  because the new weights go to the servers over NCCL after every step.
+
+`NCCL_*` / `GLOO_*` variables set in the shell that runs `chain.py` are passed into every container, for example
+`NCCL_SOCKET_IFNAME` to pick the interface.
 
 `dryrun` writes every segment's controller configuration and trainer command to `out/dryrun/` without starting anything.
 
@@ -87,6 +102,16 @@ passwordless ssh from the training node, docker, and this repository at the same
   `episodes.jsonl` for multi-turn data), plus the logs of the controller and the API throttles.
 - `out/train/<segment>/checkpoints/`: trainer checkpoints. Pruned to what later budgets need.
 - `out/exports/<name>-s060`, `-s120`, `-s180`: Hugging Face NVFP4 checkpoints for evaluation.
+
+### Disk after a chain
+
+When the chain is done, `out/train/<segment>/` still holds the weights-only checkpoints of every budget and the full
+checkpoints the branches started from (several hundred GB). Once the three exports exist, `clean` deletes them; it keeps
+the controller logs and the exports. Run it before starting the next chain if disk is short:
+
+```bash
+python3 train/launch/chain.py $E/<pair>.toml clean
+```
 
 ### When something stops
 
@@ -124,7 +149,11 @@ simulator. The same `QADX_API_*` variables are used, so set them to the gpt-5.2 
        --arm $P-s180=out/exports/$P-s180 > eval-$P.log 2>&1 &                                    # ~8-10 h on 8 GPUs
    ```
 
-   With two nodes, run the same command on both with `--shard 0/2` and `--shard 1/2`.
+   With two nodes, either evaluate different pairs on different nodes (simplest), or split one job list. To split:
+   - copy the exports to the second node at the same path;
+   - run the identical command on both, with `--shard 0/2` and `--shard 1/2`, giving each node its own τ² API key;
+   - copy the second node's `eval/results/<arm>/` directories into the first node's `eval/results/`;
+   - rebuild `summary.md` there with the same command plus `--grade-only`.
 
 The evaluation needs all GPUs of the node. Do not start it while a chain trains on that node.
 

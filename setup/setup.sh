@@ -16,7 +16,9 @@ REPO=$PWD
 V() { python3 "$REPO/tools/versions.py" "$@"; }
 step() { echo; echo "=== $*"; }
 
-export UV_PYTHON_INSTALL_DIR=$REPO/.tools/python
+# Keep every tool, cache and download inside the repository (only the docker images live outside it).
+export UV_PYTHON_INSTALL_DIR=$REPO/.tools/python UV_CACHE_DIR=$REPO/.cache/uv
+export HF_HUB_CACHE=$REPO/.cache/huggingface/hub HF_XET_CACHE=$REPO/.cache/huggingface/xet HF_DATASETS_CACHE=$REPO/.cache/huggingface/datasets
 UV=$REPO/.tools/uv/uv
 STEPS=${*:-uv images sender sources venvs models data eval-data judge}
 has() { [[ " $STEPS " == *" $1 "* ]]; }
@@ -25,9 +27,10 @@ if has uv; then
   step "uv $(V get tools.uv) and CPython $(V get tools.python) (repo-local, under .tools/)"
   want=$(V get tools.uv)
   if [ ! -x "$UV" ] || [ "$($UV --version | awk '{print $2}')" != "$want" ]; then
-    curl -LsSf "https://astral.sh/uv/$want/install.sh" | env UV_INSTALL_DIR="$REPO/.tools/uv" UV_NO_MODIFY_PATH=1 sh
+    # unmanaged install: the binary goes to .tools/uv, no receipt, no PATH change
+    curl -LsSf "https://astral.sh/uv/$want/install.sh" | env UV_UNMANAGED_INSTALL="$REPO/.tools/uv" sh
   fi
-  $UV python install "$(V get tools.python)"
+  $UV python install --no-bin "$(V get tools.python)"
 fi
 
 if has images; then

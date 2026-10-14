@@ -7,6 +7,7 @@
     python3 train/launch/chain.py EXPERIMENT.toml run   --layout 2node --peer HOST
     python3 train/launch/chain.py EXPERIMENT.toml status | stop | export | resume SEGMENT STEP [layout args]
     python3 train/launch/chain.py EXPERIMENT.toml dryrun --layout 1node             # write configs, print commands
+    python3 train/launch/chain.py EXPERIMENT.toml clean                             # after export: drop trainer checkpoints
 
 Layouts (README.md): 1node = GPUs 0-3 train (pipeline parallel 4), GPUs 4-7 serve rollouts (one vLLM server each);
 2node = this node's GPUs 0-7 train (pipeline parallel 8), the peer's GPUs 0-7 serve rollouts. Run the script on the
@@ -299,8 +300,9 @@ class Chain:
                  f"start step {start_step}, to {self.budgets[i]}, decay {self.decays[i]}, keep full at {self.keep(i)}")
 
     def stop_all(self, L=None):
-        sh("docker ps -aq --filter name=qadx-train- | xargs -r docker rm -f", check=False, quiet=True, shell=True)
+        """Stop this chain's trainer containers, controller and API throttles, and (with a layout) the rollout servers."""
         for i in range(len(self.budgets)):
+            sh(["docker", "rm", "-f", f"qadx-train-{self.seg(i)}"], check=False, quiet=True)
             rd = self.out / "runs" / self.seg(i)
             if rd.exists():
                 self.kill_spawned(rd)
@@ -313,11 +315,9 @@ class Chain:
         s = self.seg(i)
         if (self.out / "runs" / s / "CHAIN_DONE").exists():
             return "done"
-        st = sh(["docker", "inspect", "-f", "{{.State.Running}} {{.State.ExitCode}}", f"qadx-train-{s}"], check=False, capture=True, quiet=True)
-        if st.startswith("true"):
-            return "running"
-        if st:
-            return "exited"
+        r = subprocess.run(["docker", "inspect", "-f", "{{.State.Running}}", f"qadx-train-{s}"], capture_output=True, text=True)
+        if r.returncode == 0:  # the container exists (docker prints an empty line and exits 1 when it does not)
+            return "running" if r.stdout.strip() == "true" else "exited"
         return "orphan" if (self.out / "runs" / s / "steps.jsonl").exists() else "new"
 
     def preflight(self, L):
@@ -382,7 +382,8 @@ class Chain:
             elif time.time() - since > stall:
                 self.die(f"{s}: no new step for {stall // 60} min (controller: {http_get(f'http://127.0.0.1:{CTL_PORT}/status')})")
             time.sleep(60)
-        code = sh(["docker", "inspect", "-f", "{{.State.ExitCode}}", f"qadx-train-{s}"], capture=True, check=False).strip()
+        code = sh(["docker", "inspect", "-f", "{{.State.ExitCode}}", f"qadx-train-{s}"], capture=True, check=False, quiet=True).strip()
+        (self.out / "runs" / s).mkdir(parents=True, exist_ok=True)
         sh(["docker", "logs", "--tail", "200", f"qadx-train-{s}"], check=False, capture=True, quiet=True,
            stdout_file=self.out / "runs" / s / "trainer_tail.log")
         if code != "0":
@@ -510,6 +511,11 @@ class Chain:
     def dryrun(self):
         """Write each segment's controller.json to OUT/dryrun/<segment>/ and print the trainer command; starts nothing."""
         L = self.layout_spec()
+        if self.cfg.get("multiturn"):
+            missing = [v for v in ("QADX_API_BASE", "QADX_API_KEY", "QADX_SIM_MODEL") if not os.environ.get(v)]
+            if missing:
+                print(f"WARNING: multi-turn data: {', '.join(missing)} not set (a real run needs QADX_API_BASE and QADX_API_KEY; "
+                      f"QADX_SIM_MODEL defaults to {self.cfg['simulator']['model']!r}, the id of gpt-oss-120b at your endpoint may differ)")
         urls = [f"http://{L['serve_ip']}:{SRV_PORT0 + j}" for j in range(len(L["serve_gpus"]))]
         thr = [f"http://127.0.0.1:{THR_PORT0 + j}" for j in range(2)] if self.cfg.get("multiturn") else []
         for i in range(len(self.budgets)):
@@ -546,6 +552,16 @@ class Chain:
         (self.out / f"{d}.txt").write_text(out)
         print(out)
         self.log(f"step-0 comparison written to {self.out / (d + '.txt')}")
+
+    def clean(self):
+        """After every budget is exported: remove the chain's trainer checkpoints (OUT/train/<segment>), keeping the
+        controller logs (OUT/runs) and the exports. Refuses while an export is missing."""
+        missing = [b for b in self.budgets if not (self.out / "exports" / f"{self.name}-s{b:03d}" / "hf_quant_config.json").exists()]
+        if missing:
+            self.die(f"not cleaned: budgets {missing} are not exported yet")
+        for i in range(len(self.budgets)):
+            self.root(f"rm -rf /out/train/{self.seg(i)}")
+        self.log(f"cleaned: trainer checkpoints of {self.name} removed (exports and controller logs kept)")
 
     def status(self):
         for i in range(len(self.budgets)):
@@ -607,7 +623,7 @@ def http_ok(url):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("experiment")
-    ap.add_argument("action", choices=["prepare", "check-step0", "run", "status", "stop", "export", "resume", "dryrun"])
+    ap.add_argument("action", choices=["prepare", "check-step0", "run", "status", "stop", "export", "resume", "dryrun", "clean"])
     ap.add_argument("args", nargs="*", help="resume: SEGMENT STEP")
     ap.add_argument("--layout", choices=["1node", "2node"])
     ap.add_argument("--peer", help="2node: ssh host of the rollout node")
@@ -631,6 +647,8 @@ def main():
         ch.dryrun()
     elif a.action == "check-step0":
         ch.check_step0()
+    elif a.action == "clean":
+        ch.clean()
 
 
 if __name__ == "__main__":

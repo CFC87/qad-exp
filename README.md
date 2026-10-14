@@ -17,8 +17,10 @@ for anyone).
 - A Hugging Face token (`export HF_TOKEN=...`) of an account that accepted the terms of the gated evaluation sets
   `Idavidrein/gpqa`, `QAQAQAQAQ/LiveCodeBench-Pro` and `QAQAQAQAQ/LiveCodeBench-Pro-Testcase`. Everything else
   downloads without credentials.
-- Disk: about 100 GB for images, environments, the default models and data, plus about 500 GB per training chain
-  while it runs (see the experiment README).
+- Disk:
+  - about 100 GB of docker images, plus about 40 GB in the repository (environments, the default models, data);
+  - about 500 GB per training chain while it runs, which `chain.py clean` frees after its exports (see the experiment
+    README).
 
 ## Setup
 
@@ -96,6 +98,6 @@ outputs, tests.
 ## Tests without GPUs
 
 ```bash
-.venv-client/bin/python eval/tests/test_dry_run.py                                       # evaluation scheduler
+.venv-client/bin/python eval/tests/test_dry_run.py                                       # evaluation scheduler (after setup)
 cd train && for t in tests/test_*.py; do ../.venv-client/bin/python $t || break; done   # needs models/Qwen3-8B and data/
 ```

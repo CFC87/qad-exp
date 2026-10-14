@@ -62,6 +62,8 @@ used_for = "evaluation"
 
 # Python environments (.venv-<name>), built with [tools] uv / python from the lock files.
 [venvs.client]
+# the exact client environment of the reference evaluations, kept whole: it includes vllm 0.25.1 (not used for serving,
+# which runs in the image) because transformers / tokenizers / jinja2 and the graders' dependencies resolved with it
 lock = "env/locks/client.lock.txt"
 index_url = "https://download.pytorch.org/whl/cu130"
 extra_index_url = "https://pypi.org/simple"

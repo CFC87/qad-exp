@@ -24,6 +24,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import common as C  # noqa: E402
+sys.path.insert(0, str(C.LIB))
+import run_phase as RP  # noqa: E402
 
 STUB = '''import json, os, sys, time, random
 a = dict(zip(sys.argv[1::2], sys.argv[2::2]))
@@ -62,7 +64,10 @@ def main():
     results = tmp / "results"
     env = dict(os.environ, QADX_API_BASE="https://upstream.invalid/v1", QADX_API_KEY="dummy-key")
     env.pop("QADX_API_KEY_2", None)
-    before = subprocess.run(["docker", "ps", "-a", "--format", "{{.Names}}"], capture_output=True, text=True).stdout.split()
+    # only this harness's containers (qadx_vllm_gpu<i>): other containers on a shared host come and go independently
+    ours = lambda: [n for n in subprocess.run(["docker", "ps", "-a", "--format", "{{.Names}}"], capture_output=True,
+                                              text=True).stdout.split() if n.startswith("qadx_vllm_gpu")]
+    before = ours()
     r = subprocess.run([str(C.CLIENT_PY), str(C.EVAL / "run.py"), "--arm", f"fake={ck}", "--gpus", "0,1,2,3,4,5,6,7",
                         "--dry-run", "--results", str(results)], capture_output=True, text=True, env=env)
     out = r.stdout
@@ -103,11 +108,11 @@ def main():
     rep.add("tau2 commands: 3 domains, seed 300, 4 trials, no retries, concurrency 48",
             sorted(d for d, _ in tau2) == ["airline", "retail", "telecom"] and all(
                 all(x in c for x in ("--seed 300", "--num-trials 4", "--max-retries 0", "--max-concurrency 48",
-                                     "--task-split-name base", "--user-llm openai/openai/openai/gpt-5.2")) for _, c in tau2))
+                                     "--task-split-name base", f"--user-llm {RP.tau2_api_config(1, require=False)['model']}")) for _, c in tau2))
     bf = re.findall(r"^bfcl: .*$", out, re.M)
     rep.add("bfcl: 4 generate + 4 evaluate commands, first request rendered",
             len(bf) == 8 and "bfcl first request (multi_turn_base_0" in out and "--num-threads 32" in bf[0])
-    after = subprocess.run(["docker", "ps", "-a", "--format", "{{.Names}}"], capture_output=True, text=True).stdout.split()
+    after = ours()
     rep.add("dry run started no container and wrote no results", sorted(after) == sorted(before) and not any(
         f for f in results.rglob("*") if f.is_file()) if results.exists() else sorted(after) == sorted(before))
 

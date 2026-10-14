@@ -47,7 +47,7 @@ Why so strict:
 git clone https://github.com/CFC87/qad-exp.git && cd qad-exp
 export HF_TOKEN=...               # gated evaluation sets: an account that accepted their terms on Hugging Face
 # docker login nvcr.io            # only if the NeMo image pull is refused (user $oauthtoken, password an NGC API key)
-setup/setup.sh                    # mostly downloads (~100 GB); idempotent, rerun after a failure
+setup/setup.sh                    # mostly downloads (~100 GB of images, ~40 GB in the repository); rerun after a failure
 python3 tools/check_env.py        # writes reports/env_report.md and .json
 ```
 
