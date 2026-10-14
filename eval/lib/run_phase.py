@@ -220,7 +220,7 @@ def tau2_api_config(lane, require=True):
         raise SystemExit("tau2 needs QADX_API_BASE and QADX_API_KEY (an OpenAI-compatible endpoint serving gpt-5.2); "
                          "see eval/README.md")
     model = "openai/" + e.get("QADX_TAU2_MODEL_PREFIX", "openai/openai/") + e.get("QADX_TAU2_MODEL", "gpt-5.2")
-    return dict(base=base, key=key, model=model, rps=float(e.get("QADX_API_RPS", "1.2")),
+    return dict(base=base, key=key, model=model, rps=float(e.get("QADX_TAU2_RPS", "1.2")),
                 key_name="QADX_API_KEY_2" if lane == 2 and e.get("QADX_API_KEY_2") else "QADX_API_KEY")
 
 

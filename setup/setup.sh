@@ -16,9 +16,14 @@ REPO=$PWD
 V() { python3 "$REPO/tools/versions.py" "$@"; }
 step() { echo; echo "=== $*"; }
 
-# Keep every tool, cache and download inside the repository (only the docker images live outside it).
+# Keep every tool, cache and download inside the repository (only the docker images live outside it). A Hugging Face
+# token saved by `hf auth login` in the default location stays usable; HF_TOKEN in the environment takes precedence.
 export UV_PYTHON_INSTALL_DIR=$REPO/.tools/python UV_CACHE_DIR=$REPO/.cache/uv
-export HF_HUB_CACHE=$REPO/.cache/huggingface/hub HF_XET_CACHE=$REPO/.cache/huggingface/xet HF_DATASETS_CACHE=$REPO/.cache/huggingface/datasets
+if [ -z "${HF_HOME:-}" ]; then
+  [ -z "${HF_TOKEN:-}" ] && [ -z "${HF_TOKEN_PATH:-}" ] && [ -f "$HOME/.cache/huggingface/token" ] && export HF_TOKEN_PATH=$HOME/.cache/huggingface/token
+  export HF_HOME=$REPO/.cache/huggingface
+fi
+export NLTK_DATA=$REPO/.cache/nltk_data
 UV=$REPO/.tools/uv/uv
 STEPS=${*:-uv images sender sources venvs models data eval-data judge}
 has() { [[ " $STEPS " == *" $1 "* ]]; }
@@ -143,13 +148,31 @@ if has eval-data; then
   # revisions when HF_TOKEN is set (an account that accepted their terms).
   step "eval-data: evaluation prompt and test files (eval/data/SHA256SUMS)"
   eval/fetch_data.sh
+  ok_sum() { (cd "$1" && [ -s "$2" ] && grep -E "  $2\$" "$3" | sha256sum --quiet -c - >/dev/null 2>&1); }
   for g in gpqa_diamond:prep_gpqa lcb_pro:prep_lcbpro; do
     f=${g%%:*}.jsonl; script=${g#*:}
-    if (cd eval/data && sha256sum --quiet -c <(grep " $f\$" SHA256SUMS) 2>/dev/null); then echo "$f: ok"; continue; fi
+    if ok_sum eval/data "$f" SHA256SUMS; then echo "$f: ok"; continue; fi
     # gated: the Hugging Face account of HF_TOKEN (or of `hf auth login`) must have accepted the dataset's terms
-    .venv-tools/bin/python eval/prep/$script.py || echo "WARNING: $f (gated) not built: set HF_TOKEN for an account that \
-accepted the dataset's terms on Hugging Face, then rerun 'setup/setup.sh eval-data' (phases S2 / S4 need it)"
+    .venv-tools/bin/python eval/prep/$script.py && ok_sum eval/data "$f" SHA256SUMS && echo "$f: built, ok" || echo "WARNING: \
+$f (gated) not built: set HF_TOKEN for an account that accepted the dataset's terms on Hugging Face, then rerun \
+'setup/setup.sh eval-data' (phases S2 / S4 need it)"
   done
+  # IFBench's NLTK data, checked against eval/data/NLTK_SHA256SUMS (the grader would otherwise fetch the latest at run time)
+  third_party/IFBench/.venv/bin/python -c "
+import nltk
+for p in ('punkt', 'punkt_tab', 'stopwords', 'averaged_perceptron_tagger_eng'):
+    assert nltk.download(p, download_dir='$NLTK_DATA', quiet=True), p"
+  (cd "$NLTK_DATA" && grep -v '^#' "$REPO/eval/data/NLTK_SHA256SUMS" | sha256sum --quiet -c -) && echo "nltk data: ok" \
+    || { echo "NLTK data differ from eval/data/NLTK_SHA256SUMS" >&2; exit 1; }
+  # LiveCodeBench Pro test cases (gated, pinned revision), unpacked for the judge so that grading needs no token
+  if ok_sum eval/data lcb_pro.jsonl SHA256SUMS; then
+    .venv-client/bin/python -c "
+import json, sys; sys.path.insert(0, 'eval/lib')
+import grade_lcbpro as G
+pids = sorted({json.loads(l)['problem_id'] for l in open('eval/data/lcb_pro.jsonl')})
+for p in pids: G.ensure_problem(p)
+print(f'lcb_pro test cases: {len(pids)} problems ready')"
+  fi
   (cd eval/data && sha256sum --quiet -c --ignore-missing SHA256SUMS) && echo "eval data: every present file matches SHA256SUMS"
 fi
 

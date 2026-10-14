@@ -18,9 +18,12 @@ UV = REPO / ".tools" / "uv" / "uv"
 rows = []
 
 
+ENV = dict(os.environ, UV_CACHE_DIR=str(REPO / ".cache" / "uv"))   # uv's interpreter cache stays inside the repository
+
+
 def sh(cmd, cwd=None):
     try:
-        r = subprocess.run(cmd, shell=isinstance(cmd, str), cwd=cwd, capture_output=True, text=True, timeout=600)
+        r = subprocess.run(cmd, shell=isinstance(cmd, str), cwd=cwd, capture_output=True, text=True, timeout=600, env=ENV)
         return r.returncode, r.stdout.strip()
     except Exception as e:  # noqa: BLE001
         return 1, str(e)
@@ -200,27 +203,34 @@ def data():
 
 
 def eval_data():
-    """Evaluation prompt / test files against eval/data/SHA256SUMS (skip: not fetched or built yet) and the LiveCodeBench
-    Pro judge image (built by eval/setup_judge.sh)."""
-    sums = REPO / "eval" / "data" / "SHA256SUMS"
-    if not sums.exists():
-        return
-    for line in sums.read_text().splitlines():
-        if not line.strip() or line.startswith("#"):
-            continue
-        want, name = line.split()
-        p = sums.parent / name
-        if not p.exists():
-            add("eval data", name, want[:12], "not fetched / built (eval/README.md)", "skip")
-            continue
+    """Evaluation files against eval/data/SHA256SUMS, IFBench's NLTK data against eval/data/NLTK_SHA256SUMS, the unpacked
+    LiveCodeBench Pro test cases and the judge image (all made by setup/setup.sh eval-data / judge)."""
+    def sha(p):
         h = hashlib.sha256()
         with open(p, "rb") as f:
             for b in iter(lambda: f.read(1 << 24), b""):
                 h.update(b)
-        eq("eval data", name, want[:12], h.hexdigest()[:12])
+        return h.hexdigest()
+    for sums, base, cat in ((REPO / "eval" / "data" / "SHA256SUMS", REPO / "eval" / "data", "eval data"),
+                            (REPO / "eval" / "data" / "NLTK_SHA256SUMS", REPO / ".cache" / "nltk_data", "eval data (NLTK)")):
+        for line in sums.read_text().splitlines():
+            if not line.strip() or line.startswith("#"):
+                continue
+            want, name = line.split()
+            p = base / name
+            if not p.exists():
+                add(cat, name, want[:12], "missing: setup/setup.sh eval-data (gated sets need HF_TOKEN)", "FAIL")
+            else:
+                eq(cat, name, want[:12], sha(p)[:12])
+    lcb = REPO / "eval" / "data" / "lcb_pro.jsonl"
+    if lcb.exists():
+        pids = {json.loads(l)["problem_id"] for l in open(lcb)}
+        have = {p for p in pids if (REPO / ".cache" / "lcbpro_judge" / "problems" / p / "config.yaml").exists()}
+        add("eval data", "LiveCodeBench Pro test cases (unpacked)", f"{len(pids)} problems", f"{len(have)} problems",
+            "ok" if have == pids else "FAIL")
     rc, out = sh(["docker", "image", "inspect", "--format", "{{.Id}}", "lightcpverifier:qadx"])
-    add("eval data", "LiveCodeBench Pro judge image", "lightcpverifier:qadx", out[:19] if rc == 0 else "not built",
-        "ok" if rc == 0 else "skip")
+    add("eval data", "LiveCodeBench Pro judge image", "lightcpverifier:qadx", out[:19] if rc == 0 else "not built (setup/setup.sh judge)",
+        "ok" if rc == 0 else "FAIL")
 
 
 def main():

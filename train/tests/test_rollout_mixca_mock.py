@@ -6,7 +6,9 @@ packs published, no error, code rows single-turn (one sample each, never an epis
 with their scenario cards.
     ../.venv-client/bin/python tests/test_rollout_mixca_mock.py
 """
-import asyncio, collections, json, os, random, subprocess, sys, tempfile, time
+import asyncio, atexit, collections, json, os, random, shutil, subprocess, sys, tempfile, time
+_mkdtemp = tempfile.mkdtemp
+tempfile.mkdtemp = lambda *a, **k: (lambda d: (atexit.register(shutil.rmtree, d, True), d)[1])(_mkdtemp(*a, **k))  # removed at exit
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'onpolicy'))
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # the repository root
 import pyarrow.parquet as pq  # noqa: E402

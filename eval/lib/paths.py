@@ -15,6 +15,22 @@ THIRD_PARTY = REPO / "third_party"
 MODELS = REPO / "models"
 CACHE = REPO / ".cache"
 RESULTS = Path(os.environ.get("QADX_RESULTS", EVAL / "results"))
+NLTK_DIR = CACHE / "nltk_data"   # IFBench's NLTK data, fetched and checked by setup/setup.sh eval-data
+
+
+def local_caches():
+    """Keep downloads and caches inside the repository: Hugging Face (models, datasets, test cases), NLTK, uv. A token
+    saved by `hf auth login` in the default location stays usable (HF_TOKEN_PATH). Inherited by every subprocess."""
+    default_token = Path.home() / ".cache" / "huggingface" / "token"
+    if "HF_HOME" not in os.environ:
+        os.environ["HF_HOME"] = str(CACHE / "huggingface")
+        if not os.environ.get("HF_TOKEN") and "HF_TOKEN_PATH" not in os.environ and default_token.exists():
+            os.environ["HF_TOKEN_PATH"] = str(default_token)
+    os.environ.setdefault("NLTK_DATA", str(NLTK_DIR))
+    os.environ.setdefault("UV_CACHE_DIR", str(CACHE / "uv"))
+
+
+local_caches()
 
 # Python environments (all built by setup/setup.sh from env/versions.toml)
 CLIENT_PY = REPO / ".venv-client" / "bin" / "python"   # driver, chat templates, math / MCQ / MRCR / LCB / LCB Pro graders

@@ -18,7 +18,8 @@ for anyone).
   `Idavidrein/gpqa`, `QAQAQAQAQ/LiveCodeBench-Pro` and `QAQAQAQAQ/LiveCodeBench-Pro-Testcase`. Everything else
   downloads without credentials.
 - Disk:
-  - about 100 GB of docker images, plus about 40 GB in the repository (environments, the default models, data);
+  - about 100 GB of docker images, plus about 55 GB in the repository (environments, the default models, training and
+    evaluation data, including 13 GB of unpacked LiveCodeBench Pro test cases);
   - about 500 GB per training chain while it runs, which `chain.py clean` frees after its exports (see the experiment
     README).
 
@@ -99,5 +100,5 @@ outputs, tests.
 
 ```bash
 .venv-client/bin/python eval/tests/test_dry_run.py                                       # evaluation scheduler (after setup)
-cd train && for t in tests/test_*.py; do ../.venv-client/bin/python $t || break; done   # needs models/Qwen3-8B and data/
+cd train && for t in tests/test_*.py; do ../.venv-client/bin/python $t || break; done   # after setup (test_chain_ckpt_ops uses docker and the NeMo image, no GPU)
 ```

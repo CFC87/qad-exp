@@ -152,7 +152,7 @@ class Chain:
                 "-v", f"{REPO / '.cache' / 'triton'}:/root/.triton", "-v", f"{REPO / '.cache' / 'huggingface'}:/root/.cache/huggingface",
                 "-w", "/opt/Model-Optimizer/examples/megatron_bridge", *self.env_passthrough()]
         for k, v in (env or {}).items():
-            argv += ["-e", f"{k}={v}"]
+            argv += ["-e", k if v is None else f"{k}={v}"]
         argv += (["-d"] if detach else ["--rm"]) + [IMG_NEMO] + cmd
         (self.out / "train").mkdir(parents=True, exist_ok=True)
         sh(["docker", "rm", "-f", name], check=False, quiet=True)
@@ -208,7 +208,7 @@ class Chain:
                 self.die(f"port {port} is already served (a throttle from an earlier run?): run `stop` first")
             env = dict(os.environ, OPENAI_API_BASE=base, OPENAI_API_KEY=key)
             self.spawn(run_dir, f"throttle{i}", [str(PY), str(ONPOLICY / "sim_throttle.py"), "--port", str(port),
-                                                 "--rps", os.environ.get("QADX_API_RPS", "1.0")], env=env)
+                                                 "--rps", os.environ.get("QADX_SIM_RPS", "1.0")], env=env)
             for _ in range(30):
                 if http_ok(f"http://127.0.0.1:{port}/stats"):
                     break
@@ -216,7 +216,7 @@ class Chain:
             else:
                 self.die(f"throttle {i} did not come up")
             urls.append(f"http://127.0.0.1:{port}")
-        self.log(f"API throttles up: {len(urls)} key(s), {os.environ.get('QADX_API_RPS', '1.0')}/s each at most")
+        self.log(f"API throttles up: {len(urls)} key(s), {os.environ.get('QADX_SIM_RPS', '1.0')}/s each at most")
         return urls
 
     def controller_cfg(self, i, run_dir, urls, thr_urls, start_step):
@@ -289,7 +289,7 @@ class Chain:
             cmd += ["--wandb_project", os.environ["WANDB_PROJECT"], "--wandb_exp_name", s]
             if os.environ.get("WANDB_ENTITY"):
                 cmd += ["--wandb_entity", os.environ["WANDB_ENTITY"]]
-            env["WANDB_API_KEY"] = os.environ.get("WANDB_API_KEY", "")
+            env["WANDB_API_KEY"] = None   # passed through from this shell's environment (-e NAME), never written out
         return env, cmd, pp, first, last
 
     def trainer_up(self, i, L, urls, start_step):

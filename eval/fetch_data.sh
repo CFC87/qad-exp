@@ -28,6 +28,6 @@ if ok "$f"; then echo "$f: ok"; else
   echo "$f: downloaded, ok"
 fi
 
-[ -s gpqa_diamond.jsonl ] || echo "gpqa_diamond.jsonl: not built yet (gated): .venv-tools/bin/python eval/prep/prep_gpqa.py" >&2
-[ -s lcb_pro.jsonl ] || echo "lcb_pro.jsonl: not built yet (gated): .venv-tools/bin/python eval/prep/prep_lcbpro.py" >&2
+[ -s gpqa_diamond.jsonl ] || echo "gpqa_diamond.jsonl: not here yet (gated: built by setup/setup.sh eval-data with HF_TOKEN)"
+[ -s lcb_pro.jsonl ] || echo "lcb_pro.jsonl: not here yet (gated: built by setup/setup.sh eval-data with HF_TOKEN)"
 sha256sum --quiet -c --ignore-missing SHA256SUMS && echo "all present files match SHA256SUMS"

@@ -45,8 +45,10 @@ Settings common to every phase (`lib/models.py`, `lib/serve.py`, `lib/run_phase.
 
 ## Requirements
 
-- Setup done (`setup/setup.sh`) and `python3 tools/check_env.py` all `ok` apart from host warnings and `eval data`
-  items that the steps below create. The built-in arms `bf16` / `nvfp4` use `models/Qwen3-8B` / `models/Qwen3-8B-NVFP4`.
+- Setup done (`setup/setup.sh`, which also fetches and checks every evaluation file, IFBench's NLTK data and the
+  LiveCodeBench Pro test cases, and builds the judge image), and `python3 tools/check_env.py` all `ok` apart from host
+  warnings. Grading then needs no Hugging Face token and downloads nothing. The built-in arms `bf16` / `nvfp4` use
+  `models/Qwen3-8B` / `models/Qwen3-8B-NVFP4`.
 - Docker with the NVIDIA Container Toolkit; the GPUs used must be free (no other process holding memory).
 - **Hugging Face token** (`export HF_TOKEN=...`) whose account accepted the terms of `Idavidrein/gpqa`,
   `QAQAQAQAQ/LiveCodeBench-Pro` and `QAQAQAQAQ/LiveCodeBench-Pro-Testcase` (gated; the last one is also read while grading).
@@ -58,7 +60,7 @@ Settings common to every phase (`lib/models.py`, `lib/serve.py`, `lib/run_phase.
   export QADX_API_BASE=https://<endpoint>/v1   # must end in /v1
   export QADX_API_KEY=...                      # used by T2, and by T1 when there is no second key
   export QADX_API_KEY_2=...                    # optional: T1 uses it, so T1 and T2 can run at the same time
-  export QADX_API_RPS=1.2                      # optional: requests per second per running tau2 phase (default 1.2; 0 = no throttle)
+  export QADX_TAU2_RPS=1.2                      # optional: requests per second per running tau2 phase (default 1.2; 0 = no throttle)
   # the model id the endpoint receives is $QADX_TAU2_MODEL_PREFIX$QADX_TAU2_MODEL, default "openai/openai/gpt-5.2"
   # (a LiteLLM proxy's id for gpt-5.2); for an endpoint that serves it as plain "gpt-5.2":
   export QADX_TAU2_MODEL_PREFIX=""

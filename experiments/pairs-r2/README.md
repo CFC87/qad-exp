@@ -46,7 +46,7 @@ Shared settings are in `base.toml`. Do not change them (CLAUDE.md, rule 6).
   export QADX_API_BASE=https://<endpoint>/v1   # must end in /v1
   export QADX_API_KEY=...                      # a second key in QADX_API_KEY_2 doubles the throughput
   export QADX_SIM_MODEL=<the endpoint's model id for gpt-oss-120b>    # default "openai/gpt-oss-120b"
-  export QADX_API_RPS=1.0                      # requests per second per key; raise it if the endpoint allows
+  export QADX_SIM_RPS=1.0                      # simulator requests per second per key; raise it if the endpoint allows
   ```
 
   Each multi-turn step makes a few hundred simulator calls. The API rate, not the GPUs, usually sets the step time of
@@ -67,11 +67,17 @@ python3 train/launch/chain.py $E/reas_code.toml prepare        # any pair config
 #    Pass: every weight, weight_scale, weight_scale_2 and input_scale identical. Only the release has k_scale /
 #    v_scale (1.0), and that is expected. Anything else: stop and report.
 python3 train/launch/chain.py $E/reas_code.toml check-step0
-# 3. Smoke tests of the launcher, about 1 hour and 15 minutes; they are not results.
+# 3. Environment check of the evaluation (all 8 GPUs, ~3-4 h; tau2 needs the gpt-5.2 endpoint, see Evaluation):
+#    NVIDIA's NVFP4 release on every phase. Send eval/results/ when it is done; we compare it with our numbers.
+.venv-client/bin/python eval/run.py --arm nvfp4
+# 4. Smoke tests of the launcher, about 1 hour and 15 minutes; they are not results. Free their disk afterwards.
 python3 train/launch/chain.py $E/smoke.toml run --layout 1node
-python3 train/launch/chain.py $E/smoke_mt.toml run --layout 1node
-# 4. The five chains, one at a time per node (each holds all 8 GPUs of the layout).
+python3 train/launch/chain.py $E/smoke_mt.toml run --layout 1node     # needs the simulator API variables
+python3 train/launch/chain.py $E/smoke.toml clean; python3 train/launch/chain.py $E/smoke_mt.toml clean
+# 5. The five chains, one at a time per node (each holds all 8 GPUs of the layout); after each, evaluate its exports
+#    (see Evaluation) and run `clean`.
 python3 train/launch/chain.py $E/reas_code.toml run --layout 1node
+python3 train/launch/chain.py $E/reas_agent.toml run --layout 1node   # multi-turn: simulator API variables
 ...
 ```
 
@@ -134,8 +140,9 @@ The evaluation data and the judge image are installed by `setup/setup.sh`. See [
 for the τ² API variables. τ² needs an endpoint serving **gpt-5.2**, which is a different model from the training
 simulator. The same `QADX_API_*` variables are used, so set them to the gpt-5.2 endpoint while evaluating.
 
-1. **Environment check, once, before the first training run.** Evaluate NVIDIA's NVFP4 release on all phases and send
-   the results. We compare them with our numbers for the same checkpoint before the training results are interpreted.
+1. **Environment check, once, before the first training run** (step 3 of the order of work). Evaluate NVIDIA's NVFP4
+   release on all phases and send the results. We compare them with our numbers for the same checkpoint before the
+   training results are interpreted.
 
    ```bash
    nohup .venv-client/bin/python eval/run.py --arm nvfp4 > eval-nvfp4.log 2>&1 &     # ~3-4 h on 8 GPUs
@@ -167,11 +174,8 @@ then evaluation about half a day. With two nodes, running two pairs at the same 
   - `out/check-step0.txt`;
   - `reports/env_report.md` and `.json` (after `python3 tools/check_env.py`);
   - `git rev-parse HEAD` and `git status`.
-- **Once:** the `eval/results/nvfp4/` directory from step 1 of the evaluation, with `eval/results/summary.md`.
-- **For each pair:**
-  - `out/<name>.chain.log`;
-  - `out/runs/*/steps.jsonl`;
-  - `out/runs/*/controller.json`;
-  - `eval/results/<name>-s060`, `-s120` and `-s180` (each the whole directory, with `tau2_runs/` and `bfcl_runs/`);
-  - the updated `eval/results/summary.md`.
+- **For each pair:** `out/<name>.chain.log`, and `out/runs/*/steps.jsonl` and `out/runs/*/controller.json` of its
+  segments.
+- **The whole `eval/results/` directory** after each evaluation. It holds every arm's generations, grades, τ² and BFCL
+  trajectories, logs, `timing.jsonl` and `summary.md`; send it complete rather than selected files.
 - **Anything that deviated from this README**, stated explicitly.

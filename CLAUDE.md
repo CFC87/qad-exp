@@ -47,7 +47,7 @@ Why so strict:
 git clone https://github.com/CFC87/qad-exp.git && cd qad-exp
 export HF_TOKEN=...               # gated evaluation sets: an account that accepted their terms on Hugging Face
 # docker login nvcr.io            # only if the NeMo image pull is refused (user $oauthtoken, password an NGC API key)
-setup/setup.sh                    # mostly downloads (~100 GB of images, ~40 GB in the repository); rerun after a failure
+setup/setup.sh                    # mostly downloads (~100 GB of images, ~55 GB in the repository); rerun after a failure
 python3 tools/check_env.py        # writes reports/env_report.md and .json
 ```
 
@@ -69,8 +69,9 @@ Notes:
   checks each sha256 against `data/MANIFEST.toml`.
 - The `eval-data` step does three things:
   - downloads the evaluation files;
-  - rebuilds the two gated sets (GPQA, LiveCodeBench Pro) from pinned Hugging Face revisions;
-  - checks everything against `eval/data/SHA256SUMS`.
+  - rebuilds the two gated sets (GPQA, LiveCodeBench Pro) from pinned Hugging Face revisions, and unpacks the
+    LiveCodeBench Pro test cases (13 GB);
+  - fetches IFBench's NLTK data and checks everything against `eval/data/SHA256SUMS` and `eval/data/NLTK_SHA256SUMS`.
 
   The gated sets need `HF_TOKEN` from an account that accepted their terms. Without it the step warns and skips them;
   set it and rerun `setup/setup.sh eval-data`. Never commit these two files: their licenses do not allow
