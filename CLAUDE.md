@@ -47,7 +47,7 @@ Why so strict:
 git clone <this repository> && cd qad-exp
 docker login nvcr.io              # user: $oauthtoken, password: an NGC API key (needed for the NeMo image)
 export HF_TOKEN=...               # if gated Hugging Face repos/datasets are used
-setup/setup.sh                    # mostly downloads (~250 GB); idempotent, rerun after a failure
+setup/setup.sh                    # mostly downloads (~100 GB); idempotent, rerun after a failure
 python3 tools/check_env.py        # writes reports/env_report.md and .json
 ```
 
@@ -60,8 +60,9 @@ Notes:
   package has an install-order race that can silently corrupt it.
 - The `sender` step copies the `vllm` package out of the pinned serving image into `.cache/vllm-sender/`. The trainer
   uses it to push weights to the vLLM servers, so sender and receivers are the same build.
-- The `models` step downloads about 200 GB. `optional-models` adds gpt-oss-120b (about 65 GB), which only some
-  experiments need.
+- The `models` step downloads Qwen3-8B and Qwen3-8B-NVFP4 (about 22 GB), the only models the current experiments use.
+  `optional-models` adds the other pinned models (larger Qwen3 and Nemotron models, gpt-oss-120b; about 300 GB),
+  which are not needed now.
 - `tools/check_env.py --deep` hashes every model weight file against Hugging Face's recorded sha256. It takes a while.
   Run it once after the download.
 - The `data` step needs the GitHub CLI logged in with read access to this repository (`gh auth login`). It fetches the

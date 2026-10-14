@@ -14,7 +14,8 @@ for anyone).
   `python3` >= 3.11.
 - Access to `nvcr.io` (`docker login nvcr.io`, user `$oauthtoken`, an NGC API key) and to Hugging Face (`export
   HF_TOKEN=...` for gated repositories and datasets).
-- Disk: about 250 GB for images, environments and the default models.
+- Disk: about 100 GB for images, environments, the default models and data, plus about 500 GB per training chain
+  while it runs (see the experiment README).
 
 ## Setup
 
@@ -74,8 +75,15 @@ evaluation serves every model on single GPUs (tensor parallel 1).
 - [`experiments/pairs-r2`](experiments/pairs-r2/README.md): five QAD runs on mixtures of two training domains, each a
   60 / 120 / 180-step WSD chain, every budget evaluated on the full benchmark set.
 
+## Evaluation
+
+[`eval/README.md`](eval/README.md): Qwen3-8B checkpoints (BF16, NVIDIA NVFP4, QAD exports) on the full benchmark set with
+`eval/run.py`, one vLLM server per GPU, results comparable with the reference runs; data steps, the τ² API variables,
+outputs, tests.
+
 ## Tests without GPUs
 
 ```bash
+.venv-client/bin/python eval/tests/test_dry_run.py                                       # evaluation scheduler
 cd train && for t in tests/test_*.py; do ../.venv-client/bin/python $t || break; done   # needs models/Qwen3-8B and data/
 ```

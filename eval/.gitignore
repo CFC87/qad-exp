@@ -1,0 +1,8 @@
+/results/
+# built or downloaded locally (eval/prep/*, eval/fetch_data.sh); checked against data/SHA256SUMS
+/data/gpqa_diamond.jsonl
+/data/lcb_pro.jsonl
+/data/longbench_pro.jsonl
+/data/mrcr8.jsonl
+/data/lcb_test6.jsonl
+/data/*.gz

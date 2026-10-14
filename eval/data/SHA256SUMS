@@ -1,0 +1,18 @@
+# sha256 of every prompt / test file the evaluation reads (check: cd eval/data && sha256sum -c --ignore-missing SHA256SUMS).
+# Committed in git:
+0e39878ca493548d9e2d2bc661905478520409088b52d222b0f8e0811c1734d4  aime26.jsonl
+f63e499c92fd1fec3e427ad58b75346d227db4ecf52536b2dd297adcf0141136  hmmt_feb26.jsonl
+d4ce705d84bc12811cb1cc9747976499eae3b6922d1b206fab7a7b78fec9f51c  hmmt_feb25.jsonl
+cf37bddce41ebf09cc066cf4fa8feaf9a3070f901c2b792d6c57e2c7203a5dcc  hmmt_nov25.jsonl
+a8f80aa57bbf94a5b147fe60597d35e77467936d332b697ad62200d92498207b  mmlu_redux_1k.jsonl
+435ed394961c496832f03d22a89b3214577c7c1ef02129e7d5931f701c945a75  ifbench.jsonl
+86526db551e40df956770a8b2a41f7490d24a1a39f16fe643ac51ef4fa22bd8e  lcb_v6.jsonl
+6847b15ab0c1b5403387bb99766dec4861bc4884266299006e9d4bd2ccf3817c  lcbpro_excluded.json
+# Rebuilt locally from gated Hugging Face datasets (eval/prep/prep_gpqa.py, eval/prep/prep_lcbpro.py; HF_TOKEN):
+29d53c11c5205f9216128c849e049a97686331b966b7474ced0f9bc82fc1a5a3  gpqa_diamond.jsonl
+aaed59b532dcc682e6403641e46772b3c73cd054c33bf9cb316e8a3726613f92  lcb_pro.jsonl
+# Downloaded by eval/fetch_data.sh (release assets of this repository, gzipped; hashes of the uncompressed files):
+9c37c8dd4582a254894743831b54e4b9611e6a745baeb3c0ed549c6429388a80  longbench_pro.jsonl
+6b0b426df131a7c787356b9d1c0454ed2183810aba151bf1d68ebfcce6fb9e2d  mrcr8.jsonl
+# Downloaded by eval/fetch_data.sh from Hugging Face at a pinned revision (LiveCodeBench v6 test cases, for grading):
+bb4c364f71921c4495a6ad15abe1a927350b720009f4933e2e71f8af0f6fd1f5  lcb_test6.jsonl

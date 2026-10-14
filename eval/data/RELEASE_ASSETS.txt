@@ -1,0 +1,5 @@
+# Assets of the release data-v1 of this repository that eval/fetch_data.sh downloads into eval/data/.
+# Each is the gzip (gzip -n -6) of the prompt file; eval/data/SHA256SUMS holds the sha256 of the uncompressed file.
+# Paths are relative to the repository root on the machine that prepared them (.cache/ is not in git).
+.cache/release-assets/longbench_pro.jsonl.gz
+.cache/release-assets/mrcr8.jsonl.gz

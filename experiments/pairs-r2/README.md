@@ -105,15 +105,44 @@ passwordless ssh from the training node, docker, and this repository at the same
 
 ## Evaluation
 
-See the section added by the evaluation setup below.
+Set up the evaluation once per node, following [`eval/README.md`](../../eval/README.md): data steps, the judge image,
+and the τ² API variables. τ² needs an endpoint serving **gpt-5.2**, which is a different model from the training
+simulator. The same `QADX_API_*` variables are used, so set them to the gpt-5.2 endpoint while evaluating.
+
+1. **Environment check, once, before the first training run.** Evaluate NVIDIA's NVFP4 release on all phases and send
+   the results. We compare them with our numbers for the same checkpoint before the training results are interpreted.
+
+   ```bash
+   nohup .venv-client/bin/python eval/run.py --arm nvfp4 > eval-nvfp4.log 2>&1 &     # ~3-4 h on 8 GPUs
+   ```
+
+2. **After each chain:** its three exports, all phases.
+
+   ```bash
+   P=pair-reas-agent      # the config's name
+   nohup .venv-client/bin/python eval/run.py --arm $P-s060=out/exports/$P-s060 --arm $P-s120=out/exports/$P-s120 \
+       --arm $P-s180=out/exports/$P-s180 > eval-$P.log 2>&1 &                                    # ~8-10 h on 8 GPUs
+   ```
+
+   With two nodes, run the same command on both with `--shard 0/2` and `--shard 1/2`.
+
+The evaluation needs all GPUs of the node. Do not start it while a chain trains on that node.
+
+Rough time per pair on one node: training 1-1.5 days (the four multi-turn pairs depend on the simulator API rate),
+then evaluation about half a day. With two nodes, running two pairs at the same time (each on its own node with
+`--layout 1node`) finishes the five pairs sooner than running each pair on both nodes.
 
 ## What to send back
 
-For each pair:
-- `out/<name>.chain.log`;
-- `out/runs/*/steps.jsonl`;
-- `out/runs/*/controller.json`;
-- the evaluation outputs (see Evaluation);
-- `reports/env_report.md` / `.json` and `git rev-parse HEAD`.
-
-Once per node: `out/check-step0.txt`.
+- **Once per node:**
+  - `out/check-step0.txt`;
+  - `reports/env_report.md` and `.json` (after `python3 tools/check_env.py`);
+  - `git rev-parse HEAD` and `git status`.
+- **Once:** the `eval/results/nvfp4/` directory from step 1 of the evaluation, with `eval/results/summary.md`.
+- **For each pair:**
+  - `out/<name>.chain.log`;
+  - `out/runs/*/steps.jsonl`;
+  - `out/runs/*/controller.json`;
+  - `eval/results/<name>-s060`, `-s120` and `-s180` (each the whole directory, with `tau2_runs/` and `bfcl_runs/`);
+  - the updated `eval/results/summary.md`.
+- **Anything that deviated from this README**, stated explicitly.

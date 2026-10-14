@@ -75,7 +75,8 @@ used_for = "data preparation, Hugging Face CLI, LongBench Pro metrics"
 lock = "env/locks/bfcl.lock.txt"
 used_for = "BFCL multi-turn client (bfcl-eval 2026.3.23)"
 
-# Model weights under models/<dir>, at exact Hugging Face revisions.
+# Model weights under models/<dir>, at exact Hugging Face revisions. Current experiments use only Qwen3-8B and
+# Qwen3-8B-NVFP4; the others are optional (setup/setup.sh optional-models) and pinned for later experiments.
 [models.Qwen3-8B]
 repo = "Qwen/Qwen3-8B"
 revision = "b968826d9c46dd6066d109eabc6255188de91218"
@@ -87,26 +88,32 @@ revision = "ccd10a893cbca613259517c3efe08e151ddf2b8e"
 [models.Qwen3-30B-A3B]
 repo = "Qwen/Qwen3-30B-A3B"
 revision = "ad44e777bcd18fa416d9da3bd8f70d33ebb85d39"
+optional = true
 
 [models.Qwen3-30B-A3B-NVFP4]
 repo = "nvidia/Qwen3-30B-A3B-NVFP4"
 revision = "2538ded2a4edb247b4d2b4a8ba24e44bd4c017c3"
+optional = true
 
 [models.NVIDIA-Nemotron-Nano-9B-v2]
 repo = "nvidia/NVIDIA-Nemotron-Nano-9B-v2"
 revision = "6533e8de2c68e4536bf7c411d7a3ce5734111476"
+optional = true
 
 [models.NVIDIA-Nemotron-Nano-9B-v2-NVFP4]
 repo = "nvidia/NVIDIA-Nemotron-Nano-9B-v2-NVFP4"
 revision = "8556c9164ddb43fe1f4f4ad730593b3c5e3f7328"
+optional = true
 
 [models.NVIDIA-Nemotron-3-Nano-30B-A3B-BF16]
 repo = "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16"
 revision = "bf77c3174f68ad409e1c2aa60daeb46e32d1c606"
+optional = true
 
 [models.NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4]
 repo = "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4"
 revision = "6efb4a2a1c1fa277ce7b3df7a1416255011b1c99"
+optional = true
 
 [models.gpt-oss-120b]
 repo = "openai/gpt-oss-120b"

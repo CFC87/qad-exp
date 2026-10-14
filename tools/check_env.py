@@ -199,11 +199,35 @@ def data():
         eq("data", a["path"], a["sha256"][:12], h.hexdigest()[:12])
 
 
+def eval_data():
+    """Evaluation prompt / test files against eval/data/SHA256SUMS (skip: not fetched or built yet) and the LiveCodeBench
+    Pro judge image (built by eval/setup_judge.sh)."""
+    sums = REPO / "eval" / "data" / "SHA256SUMS"
+    if not sums.exists():
+        return
+    for line in sums.read_text().splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        want, name = line.split()
+        p = sums.parent / name
+        if not p.exists():
+            add("eval data", name, want[:12], "not fetched / built (eval/README.md)", "skip")
+            continue
+        h = hashlib.sha256()
+        with open(p, "rb") as f:
+            for b in iter(lambda: f.read(1 << 24), b""):
+                h.update(b)
+        eq("eval data", name, want[:12], h.hexdigest()[:12])
+    rc, out = sh(["docker", "image", "inspect", "--format", "{{.Id}}", "lightcpverifier:qadx"])
+    add("eval data", "LiveCodeBench Pro judge image", "lightcpverifier:qadx", out[:19] if rc == 0 else "not built",
+        "ok" if rc == 0 else "skip")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--deep", action="store_true", help="hash every model weight file")
     a = ap.parse_args()
-    host(); tools(); images(); sender(); sources(); venvs(); models(a.deep); data()
+    host(); tools(); images(); sender(); sources(); venvs(); models(a.deep); data(); eval_data()
     rc, commit = sh(["git", "-C", str(REPO), "rev-parse", "HEAD"])
     rc2, dirty = sh(["git", "-C", str(REPO), "status", "--porcelain", "--untracked-files=no"])
     rep = dict(time=datetime.now(timezone.utc).isoformat(timespec="seconds"), hostname=os.uname().nodename,
