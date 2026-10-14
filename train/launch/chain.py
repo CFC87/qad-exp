@@ -167,11 +167,11 @@ class Chain:
             name = f"qadx-vroll-{j}"
             argv = ["docker", "run", "-d", "--name", name, "--gpus", f"device={g}", "--ipc=host", "--net=host",
                     "-e", "VLLM_SERVER_DEV_MODE=1", "-e", "VLLM_HTTP_TIMEOUT_KEEP_ALIVE=60", *self.env_passthrough(),
-                    "-v", f"{self.models}:/models:ro", "-v", f"{REPO / '.cache' / 'vllm'}:/root/.cache/vllm",
+                    "-v", f"{self.models}:/models:ro", "-v", f"{REPO / '.cache' / 'vllm' / str(j)}:/root/.cache/vllm",  # one cache per server
                     IMG_VLLM, f"/models/{self.cfg['checkpoint']}", "--served-model-name", "student", "--port", str(port),
                     "--max-model-len", str(window), "--gpu-memory-utilization", "0.88", "--max-num-seqs", str(self.cfg["max_num_seqs"]),
                     *serve, "--weight-transfer-config", '{"backend":"nccl"}']
-            self.remote(L, f"docker rm -f {name} >/dev/null 2>&1; mkdir -p {shlex.quote(str(REPO / '.cache' / 'vllm'))}; " + shlex.join(argv))
+            self.remote(L, f"docker rm -f {name} >/dev/null 2>&1; mkdir -p {shlex.quote(str(REPO / '.cache' / 'vllm' / str(j)))}; " + shlex.join(argv))
             urls.append(f"http://{L['serve_ip']}:{port}")
         for u in urls:
             for _ in range(160):
@@ -344,14 +344,17 @@ class Chain:
             start, act = self.bp(i - 1), "branch"
             parent = self.seg(i - 1)
             if (run_dir / "steps.jsonl").exists():
-                self.die(f"{run_dir} already has a controller log")
+                self.die(f"{run_dir} already has a controller log (an earlier branch attempt?): to retry the branch, run `stop`, "
+                         f"remove out/runs/{s} and out/train/{s} (root-owned: docker run --rm -v <out>:/out --entrypoint rm "
+                         f"<nemo image> -rf /out/train/{s}), then run the chain again")
             run_dir.mkdir(parents=True, exist_ok=True)
             r = subprocess.run([sys.executable, str(ONPOLICY / "ledger.py"), "branch", str(self.out / "runs" / parent), str(run_dir),
                                 str(start), str(self.cfg["eval_every"])], capture_output=True, text=True)
             (run_dir / "driver.log").open("a").write(r.stdout + r.stderr)
             if r.returncode:
                 self.die(f"ledger branch failed: {r.stderr[-500:]}")
-            out = self.root(branch_cmd(f"/out/train/{parent}/checkpoints", f"/out/train/{s}/checkpoints", start))
+            out = sh(["docker", "run", "--rm", "-v", f"{self.out}:/out", "--entrypoint", "bash", IMG_NEMO, "-c",
+                      branch_cmd(f"/out/train/{parent}/checkpoints", f"/out/train/{s}/checkpoints", start)], capture=True, check=False)
             if "BRANCH_CKPT_OK" not in out:
                 self.die(f"branch checkpoint setup failed: {out[-500:]}")
             self.log(out.strip().splitlines()[-1])
