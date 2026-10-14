@@ -1,0 +1,8 @@
+/.tools/
+/.cache/
+/.venv-*/
+/third_party/
+/models/
+/reports/
+__pycache__/
+*.log

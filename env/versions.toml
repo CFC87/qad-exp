@@ -1,0 +1,115 @@
+# Single source of truth for every version this repo depends on.
+# setup/setup.sh installs exactly these; tools/check_env.py verifies them and writes reports/env_report.{json,md}.
+# "strict" items must match exactly; "host" items belong to the machine and are reported (a mismatch is a warning).
+
+[host]
+gpu_name = "NVIDIA B200"
+gpus_per_node = 8
+driver = "580.126.09"          # CUDA 13.0 driver API
+cuda_driver = "13.0"
+os = "Ubuntu 24.04"
+docker = "29.2.1"
+nvidia_container_toolkit = "1.18.2"
+
+[tools]
+uv = "0.12.12"
+python = "3.12.13"
+
+# Container images, pulled by registry digest (tags are mutable).
+[images.vllm]
+ref = "vllm/vllm-openai"
+tag = "v0.29.0"
+digest = "sha256:c2914767605584b6d8f45686b82de173ecc99e781897aa3d0a66dacd72c51ae1"
+# contents, for reference: vLLM 0.29.0 (commit 98dff2a81d747d1dba01a47f939f48c3526d4206), torch 2.13.0+cu130,
+# CUDA 13.0.2, FlashInfer 0.6.18, NCCL 2.30.7, Python 3.12
+used_for = "model serving (evaluation and training rollouts); its vllm package is also the trainer's weight-transfer sender"
+
+[images.nemo]
+ref = "nvcr.io/nvidia/nemo"
+tag = "26.08.01"
+digest = "sha256:fdd6e9c7929b76c8624ddfea939dda345beaf67695d9c3994994c18f9e79b9bf"
+# contents, for reference: Megatron-Bridge 0.6.1, Megatron-Core 0.19.1, torch 2.13, Transformer Engine 2.18.
+# The bundled ModelOpt is replaced at run time by the checkout in [sources.Model-Optimizer].
+used_for = "training (QAD trainer), PTQ, export to Hugging Face format"
+
+# Source checkouts under third_party/ at exact commits.
+[sources.Model-Optimizer]
+url = "https://github.com/NVIDIA/Model-Optimizer.git"
+commit = "06ad021864e1eb2128313964f2b3eb1ccd143015"   # tag 0.47.0rc2; mounted over the container's modelopt
+used_for = "training, PTQ, export"
+
+[sources.tau2-bench]
+url = "https://github.com/sierra-research/tau2-bench.git"
+commit = "fc0055dc4e0a316c3f83133267fbd6faaa770992"   # v1.0.1; env from its own uv.lock
+used_for = "evaluation"
+
+[sources.IFBench]
+url = "https://github.com/allenai/IFBench.git"
+commit = "1c40f0c10d9b5c5c2f10a175a28007ebb64f7f4d"   # env from its own uv.lock
+used_for = "evaluation"
+
+[sources.LiveCodeBench-Pro]
+url = "https://github.com/GavinZhengOI/LiveCodeBench-Pro.git"
+commit = "d614eef4f95b3654bf0758c64e1194b2575850b8"
+submodule_LightCPVerifier = "021d121c882e70856b66113142495e31b9fe1d80"
+used_for = "evaluation"
+
+[sources.longcontext]
+url = "https://github.com/caskcsg/longcontext.git"
+commit = "49ee3192bd2f9176515444370348aa55db5348ce"   # sparse checkout of LongBench-Pro/
+sparse = "LongBench-Pro"
+used_for = "evaluation"
+
+# Python environments (.venv-<name>), built with [tools] uv / python from the lock files.
+[venvs.client]
+lock = "env/locks/client.lock.txt"
+index_url = "https://download.pytorch.org/whl/cu130"
+extra_index_url = "https://pypi.org/simple"
+used_for = "experiment driver, client-side chat templates (transformers 5.17.0), graders"
+
+[venvs.tools]
+lock = "env/locks/tools.lock.txt"
+used_for = "data preparation, Hugging Face CLI, LongBench Pro metrics"
+
+[venvs.bfcl]
+lock = "env/locks/bfcl.lock.txt"
+used_for = "BFCL multi-turn client (bfcl-eval 2026.3.23)"
+
+# Model weights under models/<dir>, at exact Hugging Face revisions.
+[models.Qwen3-8B]
+repo = "Qwen/Qwen3-8B"
+revision = "b968826d9c46dd6066d109eabc6255188de91218"
+
+[models.Qwen3-8B-NVFP4]
+repo = "nvidia/Qwen3-8B-NVFP4"
+revision = "ccd10a893cbca613259517c3efe08e151ddf2b8e"
+
+[models.Qwen3-30B-A3B]
+repo = "Qwen/Qwen3-30B-A3B"
+revision = "ad44e777bcd18fa416d9da3bd8f70d33ebb85d39"
+
+[models.Qwen3-30B-A3B-NVFP4]
+repo = "nvidia/Qwen3-30B-A3B-NVFP4"
+revision = "2538ded2a4edb247b4d2b4a8ba24e44bd4c017c3"
+
+[models.NVIDIA-Nemotron-Nano-9B-v2]
+repo = "nvidia/NVIDIA-Nemotron-Nano-9B-v2"
+revision = "6533e8de2c68e4536bf7c411d7a3ce5734111476"
+
+[models.NVIDIA-Nemotron-Nano-9B-v2-NVFP4]
+repo = "nvidia/NVIDIA-Nemotron-Nano-9B-v2-NVFP4"
+revision = "8556c9164ddb43fe1f4f4ad730593b3c5e3f7328"
+
+[models.NVIDIA-Nemotron-3-Nano-30B-A3B-BF16]
+repo = "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16"
+revision = "bf77c3174f68ad409e1c2aa60daeb46e32d1c606"
+
+[models.NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4]
+repo = "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4"
+revision = "6efb4a2a1c1fa277ce7b3df7a1416255011b1c99"
+
+[models.gpt-oss-120b]
+repo = "openai/gpt-oss-120b"
+revision = "b5c939de8f754692c1647ca79fbf85e8c1e70f8a"
+exclude = ["original/*", "metal/*"]
+optional = true   # only for experiments that run a local simulator / judge
