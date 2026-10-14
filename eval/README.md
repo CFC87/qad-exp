@@ -50,7 +50,6 @@ Settings common to every phase (`lib/models.py`, `lib/serve.py`, `lib/run_phase.
 - Docker with the NVIDIA Container Toolkit; the GPUs used must be free (no other process holding memory).
 - **Hugging Face token** (`export HF_TOKEN=...`) whose account accepted the terms of `Idavidrein/gpqa`,
   `QAQAQAQAQ/LiveCodeBench-Pro` and `QAQAQAQAQ/LiveCodeBench-Pro-Testcase` (gated; the last one is also read while grading).
-- **GitHub CLI** logged in with read access to this repository (`gh auth login`) for the release assets.
 - **tau2 API** (phases T1 / T2): an OpenAI-compatible endpoint serving **gpt-5.2**. It plays the customer in every tau2
   conversation and judges the retail tasks' natural-language assertions; requests are sent with `reasoning_effort:
   "none"` and temperature 0. Set in the environment (never in files of this repository):
@@ -74,13 +73,10 @@ Settings common to every phase (`lib/models.py`, `lib/serve.py`, `lib/run_phase.
 Run from the repository root.
 
 ```bash
-# 1. data: large files from the release, LiveCodeBench test cases, and the two gated files rebuilt locally
-eval/fetch_data.sh
-.venv-tools/bin/python eval/prep/prep_gpqa.py
-.venv-tools/bin/python eval/prep/prep_lcbpro.py
-(cd eval/data && sha256sum -c SHA256SUMS)          # every file must be OK
-# 2. the LiveCodeBench Pro judge image (once per node)
-eval/setup_judge.sh
+# 1. data and judge image: done by setup/setup.sh (steps eval-data and judge); to redo only these:
+#    setup/setup.sh eval-data judge
+# 2. check: every evaluation file present and matching eval/data/SHA256SUMS, judge image built
+python3 tools/check_env.py
 # 3. dry run: the plan, every job's docker command and first request; starts nothing
 .venv-client/bin/python eval/run.py --arm qad060=/path/to/export-s060 --dry-run
 # 4. the run (all 9 phases of each arm, all GPUs of the node)

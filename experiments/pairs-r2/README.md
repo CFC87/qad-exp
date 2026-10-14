@@ -105,8 +105,8 @@ passwordless ssh from the training node, docker, and this repository at the same
 
 ## Evaluation
 
-Set up the evaluation once per node, following [`eval/README.md`](../../eval/README.md): data steps, the judge image,
-and the τ² API variables. τ² needs an endpoint serving **gpt-5.2**, which is a different model from the training
+The evaluation data and the judge image are installed by `setup/setup.sh`. See [`eval/README.md`](../../eval/README.md)
+for the τ² API variables. τ² needs an endpoint serving **gpt-5.2**, which is a different model from the training
 simulator. The same `QADX_API_*` variables are used, so set them to the gpt-5.2 endpoint while evaluating.
 
 1. **Environment check, once, before the first training run.** Evaluate NVIDIA's NVFP4 release on all phases and send

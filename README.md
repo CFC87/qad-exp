@@ -12,22 +12,34 @@ for anyone).
 - 1 or 2 nodes, 8x NVIDIA B200 each.
 - Ubuntu 24.04, NVIDIA driver 580.126.09 (CUDA 13.0), Docker with the NVIDIA Container Toolkit, `git`, `curl`,
   `python3` >= 3.11.
-- Access to `nvcr.io` (`docker login nvcr.io`, user `$oauthtoken`, an NGC API key) and to Hugging Face (`export
-  HF_TOKEN=...` for gated repositories and datasets).
+- Docker access to `nvcr.io` for the NeMo image (if the pull is refused: `docker login nvcr.io`, user `$oauthtoken`,
+  password an NGC API key).
+- A Hugging Face token (`export HF_TOKEN=...`) of an account that accepted the terms of the gated evaluation sets
+  `Idavidrein/gpqa`, `QAQAQAQAQ/LiveCodeBench-Pro` and `QAQAQAQAQ/LiveCodeBench-Pro-Testcase`. Everything else
+  downloads without credentials.
 - Disk: about 100 GB for images, environments, the default models and data, plus about 500 GB per training chain
   while it runs (see the experiment README).
 
 ## Setup
 
 ```bash
-setup/setup.sh                    # uv + Python, images, sources, environments, models, training data (idempotent)
-python3 tools/check_env.py        # verify everything against env/versions.toml and data/MANIFEST.toml
+git clone https://github.com/CFC87/qad-exp.git && cd qad-exp
+export HF_TOKEN=...               # gated evaluation sets (see Requirements)
+setup/setup.sh                    # everything below; idempotent, rerun after an interruption
+python3 tools/check_env.py        # verify everything; writes reports/env_report.md
 ```
 
-`setup/setup.sh <step> ...` runs single steps: `uv`, `images`, `sender`, `sources`, `venvs`, `models`, `data`,
-`optional-models`. Everything is installed inside the repository (`.tools/`, `.venv-*`, `third_party/`, `models/`,
-`data/`, `.cache/`); nothing is installed system-wide. The `data` step downloads the training lists from this
-repository's GitHub release `data-v1` with the GitHub CLI (`gh auth login` first) and checks their sha256.
+`setup/setup.sh <step> ...` runs single steps:
+- `uv`, `images`, `sender`, `sources`, `venvs`: the tools, images, third-party code and Python environments;
+- `models`: the models;
+- `data`: the training lists, from this repository's release `data-v1`;
+- `eval-data`: the evaluation files. The two gated sets are rebuilt with `HF_TOKEN`;
+- `judge`: the LiveCodeBench Pro judge image;
+- `optional-models`: models not needed by the current experiments.
+
+Everything is installed inside the repository: `.tools/`, `.venv-*`, `third_party/`, `models/`, `data/`, `eval/data/`,
+`.cache/`. Nothing is installed system-wide. Every downloaded file is checked against a pinned commit, digest,
+revision or sha256.
 
 ## Pinned versions
 

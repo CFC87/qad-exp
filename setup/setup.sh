@@ -4,10 +4,12 @@
 #   setup/setup.sh                 # all steps except optional models
 #   setup/setup.sh images venvs    # only some steps
 #
-# Steps: uv, images, sender, sources, venvs, models, data.  Add "optional-models" to also fetch models marked optional.
+# Steps: uv, images, sender, sources, venvs, models, data, eval-data, judge.  Add "optional-models" to also fetch
+# models marked optional.
 # Prerequisites: Ubuntu 24.04, NVIDIA driver with CUDA 13.0, docker + NVIDIA Container Toolkit, git, curl, python3 >= 3.11.
 # The NeMo image is on nvcr.io: run `docker login nvcr.io` (user $oauthtoken, an NGC API key) first if the pull is refused.
-# Gated Hugging Face repos/datasets need `export HF_TOKEN=...`.
+# The gated evaluation sets (GPQA, LiveCodeBench Pro) need `export HF_TOKEN=...` of an account that accepted their
+# terms on Hugging Face; everything else is downloaded without credentials.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 REPO=$PWD
@@ -16,7 +18,7 @@ step() { echo; echo "=== $*"; }
 
 export UV_PYTHON_INSTALL_DIR=$REPO/.tools/python
 UV=$REPO/.tools/uv/uv
-STEPS=${*:-uv images sender sources venvs models data}
+STEPS=${*:-uv images sender sources venvs models data eval-data judge}
 has() { [[ " $STEPS " == *" $1 "* ]]; }
 
 if has uv; then
@@ -104,14 +106,14 @@ if has models || has optional-models; then
 fi
 
 if has data; then
-  # Release assets listed in data/MANIFEST.toml (training lists, scenario cards; evaluation files are fetched by the
-  # evaluation's own step). Needs the GitHub CLI logged in with read access to this repository (`gh auth login`).
-  step "data: release assets of data/MANIFEST.toml"
-  command -v gh >/dev/null || { echo "the data step needs the GitHub CLI (gh)" >&2; exit 1; }
+  # Training data: release assets listed in data/MANIFEST.toml (public HTTPS download, no login), each checked against
+  # its sha256 before it is put in place.
+  step "data: training lists and scenario cards (data/MANIFEST.toml)"
   python3 - <<'PY'
-import hashlib, subprocess, sys, tempfile, tomllib
+import hashlib, os, tempfile, tomllib, urllib.request
 from pathlib import Path
 m = tomllib.load(open("data/MANIFEST.toml", "rb"))
+base = f"https://github.com/{m['repo']}/releases/download/{m['release']}"
 def sha(p):
     h = hashlib.sha256()
     with open(p, "rb") as f:
@@ -122,15 +124,35 @@ for name, a in m["assets"].items():
     dst = Path(a["path"])
     if dst.exists() and sha(dst) == a["sha256"]:
         print(f"ok      {dst}"); continue
-    with tempfile.TemporaryDirectory(dir=".") as tmp:
-        subprocess.run(["gh", "release", "download", m["release"], "-R", m["repo"], "-p", name, "-D", tmp], check=True)
-        got = Path(tmp) / name
-        if sha(got) != a["sha256"]:
-            sys.exit(f"sha256 mismatch for {name}")
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        got.replace(dst)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=dst.parent, suffix=".part"); os.close(fd)
+    urllib.request.urlretrieve(f"{base}/{name}", tmp)
+    if sha(tmp) != a["sha256"]:
+        os.unlink(tmp); raise SystemExit(f"sha256 mismatch for {name}")
+    os.replace(tmp, dst)
     print(f"fetched {dst}")
 PY
+fi
+
+if has eval-data; then
+  # Evaluation files (eval/data/SHA256SUMS): the large prompt files from the release and the LiveCodeBench v6 test
+  # cases (public); GPQA Diamond and LiveCodeBench Pro are gated on Hugging Face and rebuilt locally from pinned
+  # revisions when HF_TOKEN is set (an account that accepted their terms).
+  step "eval-data: evaluation prompt and test files (eval/data/SHA256SUMS)"
+  eval/fetch_data.sh
+  for g in gpqa_diamond:prep_gpqa lcb_pro:prep_lcbpro; do
+    f=${g%%:*}.jsonl; script=${g#*:}
+    if (cd eval/data && sha256sum --quiet -c <(grep " $f\$" SHA256SUMS) 2>/dev/null); then echo "$f: ok"; continue; fi
+    # gated: the Hugging Face account of HF_TOKEN (or of `hf auth login`) must have accepted the dataset's terms
+    .venv-tools/bin/python eval/prep/$script.py || echo "WARNING: $f (gated) not built: set HF_TOKEN for an account that \
+accepted the dataset's terms on Hugging Face, then rerun 'setup/setup.sh eval-data' (phases S2 / S4 need it)"
+  done
+  (cd eval/data && sha256sum --quiet -c --ignore-missing SHA256SUMS) && echo "eval data: every present file matches SHA256SUMS"
+fi
+
+if has judge; then
+  step "judge: LiveCodeBench Pro judge image (CPU-only docker build)"
+  eval/setup_judge.sh
 fi
 
 step "done; verify with: python3 tools/check_env.py"

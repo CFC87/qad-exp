@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Download the evaluation files that are too large for git into eval/data/ and verify them against eval/data/SHA256SUMS.
 # Idempotent: files whose sha256 already matches are not downloaded again.
-#   longbench_pro.jsonl, mrcr8.jsonl   release assets (gzipped) of this repository, tag data-v1: needs the GitHub CLI
-#                                      logged in with read access to the repository (gh auth login)
+#   longbench_pro.jsonl, mrcr8.jsonl   release assets (gzipped) of this repository, tag data-v1 (public download)
 #   lcb_test6.jsonl                    LiveCodeBench v6 test cases (grading), Hugging Face at a pinned revision
 # The two gated files (gpqa_diamond.jsonl, lcb_pro.jsonl) are rebuilt by eval/prep/*.py instead (HF_TOKEN).
 set -euo pipefail
@@ -16,10 +15,7 @@ ok() { [ -s "$1" ] && [ "$(sha256sum "$1" | cut -c1-64)" = "$(want "$1")" ]; }
 
 for f in longbench_pro.jsonl mrcr8.jsonl; do
   if ok "$f"; then echo "$f: ok"; continue; fi
-  tmp=$(mktemp -d)
-  gh release download "$TAG" -R "$GH_REPO" -p "$f.gz" -D "$tmp"
-  gunzip -c "$tmp/$f.gz" > "$f.part" && mv "$f.part" "$f"
-  rm -rf "$tmp"
+  curl -fsSL "https://github.com/$GH_REPO/releases/download/$TAG/$f.gz" | gunzip -c > "$f.part" && mv "$f.part" "$f"
   ok "$f" || { echo "$f: sha256 does not match SHA256SUMS" >&2; exit 1; }
   echo "$f: downloaded, ok"
 done

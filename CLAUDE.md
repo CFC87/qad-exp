@@ -44,9 +44,9 @@ Why so strict:
 ## Setup walkthrough
 
 ```bash
-git clone <this repository> && cd qad-exp
-docker login nvcr.io              # user: $oauthtoken, password: an NGC API key (needed for the NeMo image)
-export HF_TOKEN=...               # if gated Hugging Face repos/datasets are used
+git clone https://github.com/CFC87/qad-exp.git && cd qad-exp
+export HF_TOKEN=...               # gated evaluation sets: an account that accepted their terms on Hugging Face
+# docker login nvcr.io            # only if the NeMo image pull is refused (user $oauthtoken, password an NGC API key)
 setup/setup.sh                    # mostly downloads (~100 GB); idempotent, rerun after a failure
 python3 tools/check_env.py        # writes reports/env_report.md and .json
 ```
@@ -65,8 +65,16 @@ Notes:
   which are not needed now.
 - `tools/check_env.py --deep` hashes every model weight file against Hugging Face's recorded sha256. It takes a while.
   Run it once after the download.
-- The `data` step needs the GitHub CLI logged in with read access to this repository (`gh auth login`). It fetches the
-  training lists from the release `data-v1` and checks each sha256 against `data/MANIFEST.toml`.
+- The `data` step downloads the training lists from this repository's release `data-v1`; no login is needed. It
+  checks each sha256 against `data/MANIFEST.toml`.
+- The `eval-data` step does three things:
+  - downloads the evaluation files;
+  - rebuilds the two gated sets (GPQA, LiveCodeBench Pro) from pinned Hugging Face revisions;
+  - checks everything against `eval/data/SHA256SUMS`.
+
+  The gated sets need `HF_TOKEN` from an account that accepted their terms. Without it the step warns and skips them;
+  set it and rerun `setup/setup.sh eval-data`. Never commit these two files: their licenses do not allow
+  redistribution.
 
 ## Layouts
 
