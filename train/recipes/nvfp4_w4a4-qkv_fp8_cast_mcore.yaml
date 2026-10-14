@@ -1,0 +1,33 @@
+# Megatron-Core PTQ/QAD recipe (used for dense Qwen3-8B):
+#   every decoder linear (attention qkv/proj, MLP or routed experts)  NVFP4 W4A4 (block 16, weights and activations)
+#   Q, K, V at the attention BMMs                                     FP8 cast (constant amax 448, i.e. scale 1.0),
+#                                                                     matching vLLM with an FP8 KV cache at scale 1.0
+#   lm_head (output layer), embeddings, router                        BF16
+# Selectors are Megatron-Core leaf names; use with examples/megatron_bridge/quantize.py --recipe <path>.
+# modelopt-schema: modelopt.recipe.config.ModelOptPTQRecipe
+
+imports:
+  base_disable_all: configs/ptq/units/base_disable_all
+  default_disabled_quantizers: configs/ptq/units/default_disabled_quantizers
+  fp8: configs/numerics/fp8
+  w4a4_nvfp4_nvfp4: configs/ptq/units/w4a4_nvfp4_nvfp4
+
+metadata:
+  recipe_type: ptq
+  description: >-
+    NVFP4 W4A4 on every decoder linear (attention, dense MLP or routed experts), FP8 Q/K/V in attention
+    (cast, as vLLM with an FP8 KV cache); router, output layer and embeddings in BF16. Mirrors the evaluated
+    Qwen3-8B-NVFP4 and Qwen3-30B-A3B-NVFP4 checkpoints. Same as general/ptq/nvfp4_default-kv_fp8_cast plus Q.
+
+quantize:
+  algorithm: max
+  quant_cfg:
+    - $import: base_disable_all
+    - $import: w4a4_nvfp4_nvfp4
+    # FP8 cast (constant amax 448, scale 1.0) on Q, K and V: vLLM's FlashInfer path with an FP8 KV cache also
+    # casts Q to FP8, with q_scale = k_scale = 1.0 (no q scale in any evaluated checkpoint)
+    - quantizer_name: '*[qkv]_bmm_quantizer'
+      cfg:
+        $import: fp8
+        use_constant_amax: true
+    - $import: default_disabled_quantizers

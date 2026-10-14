@@ -1,0 +1,3 @@
+include = "base.toml"
+name = "pair-reas-code"
+subset = "mix_reas_code_s20261008"   # reasoning + code, 50 / 50 packed tokens; single turn only

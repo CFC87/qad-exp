@@ -1,0 +1,24 @@
+# Settings shared by the five pair runs. Every value equals the reference runs; change none of them (CLAUDE.md rule 6).
+model = "Qwen3-8B"              # models/<dir>: BF16 teacher, student architecture, tokenizer
+checkpoint = "Qwen3-8B-NVFP4"   # models/<dir>: rollout start point; its input scales become the student's activation scales
+rope = "plain"                  # native RoPE, no YaRN
+window = 40960                  # generation context (max-model-len); responses up to min(cap, window - prompt)
+cap = 32768
+budgets = [60, 120, 180]        # one WSD chain; each budget is exported and evaluated
+decays = [15, 20, 30]           # steps of LR decay at the end of each budget (branch points 45 and 100)
+warmup = 5
+lr = 1e-5
+min_lr = 1e-6
+gbs = 36                        # packs of 131,072 tokens per optimizer step
+n_packs = 32
+target_packs = 29
+eval_every = 10                 # validation and checkpoint interval
+val_n = 187
+max_num_seqs = 128
+hist_sup = true
+expected_json = "train/configs/expected_bench_8b.json"
+stall_min = 120
+
+[simulator]                     # multi-turn user / tool simulator (only pairs with tau2-style or function-calling data)
+model = "openai/gpt-oss-120b"   # the endpoint's id for gpt-oss-120b; override with QADX_SIM_MODEL
+reasoning_effort = "low"

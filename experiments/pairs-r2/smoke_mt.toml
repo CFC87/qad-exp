@@ -1,0 +1,11 @@
+# Short check of the multi-turn path (simulator API, scenario cards) before the pairs with customer-service or
+# function-calling data: one 2-step segment. Not a result.
+include = "reas_agent.toml"
+name = "smoke-mt"
+budgets = [2]
+decays = [1]
+warmup = 1
+eval_every = 2
+val_n = 32
+n_packs = 4
+target_packs = 4

@@ -1,0 +1,13 @@
+# Short end-to-end check of the launcher before the real runs (about 1 hour): two segments (start, then a WSD branch),
+# validation and checkpoints every 2 steps, small generation target per step, two exports. Single-turn data only, so no
+# API is needed. Not a result: only that every stage works on this machine.
+include = "base.toml"
+name = "smoke"
+subset = "mix_reas_code_s20261008"
+budgets = [6, 8]
+decays = [2, 2]
+warmup = 2
+eval_every = 2
+val_n = 32
+n_packs = 4
+target_packs = 4

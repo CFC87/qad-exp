@@ -1,0 +1,21 @@
+include = "base.toml"
+name = "pair-code-fc"
+subset = "mix_code_fc_s20261007"   # code + multi-turn function calling, 50 / 50 packed tokens
+
+[multiturn."SFT-Agentic-v2/tool_calling"]   # played end to end; stored user turns replayed, tool results simulated
+env = "replay_tools"
+mode = "each"
+log = true
+cost_prior = 9.9
+
+[multiturn."Agentic-v1/tool_calling"]
+env = "replay_tools"
+mode = "each"
+log = true
+cost_prior = 8.5
+
+[multiturn."RL-Agentic-Function-Calling-Pivot-v1"]
+env = "replay_tools"
+mode = "each"
+log = true
+cost_prior = 8.5

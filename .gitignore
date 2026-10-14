@@ -6,3 +6,7 @@
 /reports/
 __pycache__/
 *.log
+/data/**/*.parquet
+/data/**/*.jsonl
+/data/**/*.jsonl.gz
+/out/

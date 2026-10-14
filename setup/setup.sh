@@ -4,7 +4,7 @@
 #   setup/setup.sh                 # all steps except optional models
 #   setup/setup.sh images venvs    # only some steps
 #
-# Steps: uv, images, sender, sources, venvs, models.  Add "optional-models" to also fetch models marked optional.
+# Steps: uv, images, sender, sources, venvs, models, data.  Add "optional-models" to also fetch models marked optional.
 # Prerequisites: Ubuntu 24.04, NVIDIA driver with CUDA 13.0, docker + NVIDIA Container Toolkit, git, curl, python3 >= 3.11.
 # The NeMo image is on nvcr.io: run `docker login nvcr.io` (user $oauthtoken, an NGC API key) first if the pull is refused.
 # Gated Hugging Face repos/datasets need `export HF_TOKEN=...`.
@@ -16,7 +16,7 @@ step() { echo; echo "=== $*"; }
 
 export UV_PYTHON_INSTALL_DIR=$REPO/.tools/python
 UV=$REPO/.tools/uv/uv
-STEPS=${*:-uv images sender sources venvs models}
+STEPS=${*:-uv images sender sources venvs models data}
 has() { [[ " $STEPS " == *" $1 "* ]]; }
 
 if has uv; then
@@ -101,6 +101,36 @@ if has models || has optional-models; then
     done
     "$HF" download "$repo" --revision "$rev" --local-dir "models/$m" "${ex[@]}"
   done
+fi
+
+if has data; then
+  # Release assets listed in data/MANIFEST.toml (training lists, scenario cards; evaluation files are fetched by the
+  # evaluation's own step). Needs the GitHub CLI logged in with read access to this repository (`gh auth login`).
+  step "data: release assets of data/MANIFEST.toml"
+  command -v gh >/dev/null || { echo "the data step needs the GitHub CLI (gh)" >&2; exit 1; }
+  python3 - <<'PY'
+import hashlib, subprocess, sys, tempfile, tomllib
+from pathlib import Path
+m = tomllib.load(open("data/MANIFEST.toml", "rb"))
+def sha(p):
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        for b in iter(lambda: f.read(1 << 24), b""):
+            h.update(b)
+    return h.hexdigest()
+for name, a in m["assets"].items():
+    dst = Path(a["path"])
+    if dst.exists() and sha(dst) == a["sha256"]:
+        print(f"ok      {dst}"); continue
+    with tempfile.TemporaryDirectory(dir=".") as tmp:
+        subprocess.run(["gh", "release", "download", m["release"], "-R", m["repo"], "-p", name, "-D", tmp], check=True)
+        got = Path(tmp) / name
+        if sha(got) != a["sha256"]:
+            sys.exit(f"sha256 mismatch for {name}")
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        got.replace(dst)
+    print(f"fetched {dst}")
+PY
 fi
 
 step "done; verify with: python3 tools/check_env.py"

@@ -1,0 +1,22 @@
+{
+ "name": "mix_reas_agent_s20261014",
+ "description": "reasoning (math competition / StackExchange / science) + multi-turn customer-service conversations",
+ "train_ranks": [
+  0,
+  85000
+ ],
+ "val_ranks": [
+  85000,
+  85300
+ ],
+ "validation": "300 single-turn prompts shared by every list (ranks val_ranks)",
+ "sources": {
+  "reas": "dom_reasoning_60k_s20261004",
+  "agent": "dom_agent_e2e_25k_s20261004"
+ },
+ "packed_tokens_per_prompt": {
+  "reas": 10103,
+  "agent": 19213
+ },
+ "rule": "Two domain lists, all their training rows, each in its own order, interleaved by the packed tokens a prompt of each list takes on average during training (row i of a list placed at (i + 0.5) x its cost), so every prefix holds about half the packed tokens of each domain; once the shorter list ends, only the other follows. Columns: the union of both lists plus `domain` and `src_rank`."
+}

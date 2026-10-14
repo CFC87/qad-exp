@@ -185,11 +185,25 @@ def models(deep):
         add("models", k, m["revision"][:12], found, "ok" if ok else "FAIL")
 
 
+def data():
+    m = tomllib.loads((REPO / "data" / "MANIFEST.toml").read_text())
+    for name, a in m["assets"].items():
+        p = REPO / a["path"]
+        if not p.exists():
+            add("data", a["path"], a["sha256"][:12], "not fetched", "FAIL")
+            continue
+        h = hashlib.sha256()
+        with open(p, "rb") as f:
+            for b in iter(lambda: f.read(1 << 24), b""):
+                h.update(b)
+        eq("data", a["path"], a["sha256"][:12], h.hexdigest()[:12])
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--deep", action="store_true", help="hash every model weight file")
     a = ap.parse_args()
-    host(); tools(); images(); sender(); sources(); venvs(); models(a.deep)
+    host(); tools(); images(); sender(); sources(); venvs(); models(a.deep); data()
     rc, commit = sh(["git", "-C", str(REPO), "rev-parse", "HEAD"])
     rc2, dirty = sh(["git", "-C", str(REPO), "status", "--porcelain", "--untracked-files=no"])
     rep = dict(time=datetime.now(timezone.utc).isoformat(timespec="seconds"), hostname=os.uname().nodename,

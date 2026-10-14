@@ -1,0 +1,22 @@
+{
+ "name": "mix_reas_fc_s20261014",
+ "description": "reasoning + multi-turn function calling",
+ "train_ranks": [
+  0,
+  110000
+ ],
+ "val_ranks": [
+  110000,
+  110300
+ ],
+ "validation": "300 single-turn prompts shared by every list (ranks val_ranks)",
+ "sources": {
+  "reas": "dom_reasoning_60k_s20261004",
+  "fc": "dom_fc_e2e_50k_s20261004"
+ },
+ "packed_tokens_per_prompt": {
+  "reas": 10103,
+  "fc": 14502
+ },
+ "rule": "Two domain lists, all their training rows, each in its own order, interleaved by the packed tokens a prompt of each list takes on average during training (row i of a list placed at (i + 0.5) x its cost), so every prefix holds about half the packed tokens of each domain; once the shorter list ends, only the other follows. Columns: the union of both lists plus `domain` and `src_rank`."
+}

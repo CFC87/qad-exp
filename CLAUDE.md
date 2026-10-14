@@ -64,6 +64,8 @@ Notes:
   experiments need.
 - `tools/check_env.py --deep` hashes every model weight file against Hugging Face's recorded sha256. It takes a while.
   Run it once after the download.
+- The `data` step needs the GitHub CLI logged in with read access to this repository (`gh auth login`). It fetches the
+  training lists from the release `data-v1` and checks each sha256 against `data/MANIFEST.toml`.
 
 ## Layouts
 
@@ -74,6 +76,17 @@ Notes:
 
 Evaluation-only experiments run one single-GPU server per GPU. Run scripts take the layout as an argument; do not
 invent other splits.
+
+## Running an experiment
+
+Each experiment directory under `experiments/` has a README: read it fully before starting. In short:
+- Training goes through `train/launch/chain.py <config> <action> --layout 1node|2node`. Run `dryrun` first: it starts
+  nothing and shows what would run.
+- External model APIs (the multi-turn simulator during training, the τ² user simulator during evaluation) are
+  configured only through environment variables, never in files. Each experiment README names the variables and the
+  model each one must serve. If the person you work with has not provided them, ask; do not substitute another model.
+- Long runs: launch them with `nohup ... &` or in `tmux`, and follow `out/<name>.chain.log`. A `CHAIN_STOP` line means
+  the chain stopped on a problem: report it (rule 3).
 
 ## Reporting results
 

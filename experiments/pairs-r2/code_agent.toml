@@ -1,0 +1,18 @@
+include = "base.toml"
+name = "pair-code-agent"
+subset = "mix_code_agent_s20261010"   # code + customer-service conversations, 50 / 50 packed tokens
+scenario_cards = ["data/subsets/dom_agent_e2e_25k_s20261004/scenario_cards_final.parquet"]
+
+[multiturn."SFT-Agentic-v2/interactive_agent"]   # played end to end; the simulator acts the customer from a scenario card
+env = "sim"
+mode = "each"
+require_card = true
+log = true
+cost_prior = 7.3
+
+[multiturn."Agentic-v1/interactive_agent"]
+env = "sim"
+mode = "each"
+require_card = true
+log = true
+cost_prior = 7.8

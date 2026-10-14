@@ -1,0 +1,119 @@
+# Pairs of training domains (five runs)
+
+On-policy QAD of Qwen3-8B (NVFP4 W4A4, FP8 KV cache) on mixtures of two training domains, each mixture trained as one
+WSD chain whose 60-, 120- and 180-step budgets are exported and evaluated on the full benchmark set.
+
+| Config | Mixture (50 / 50 by packed tokens) | Multi-turn | Needs the simulator API |
+|---|---|---|---|
+| `reas_agent.toml` | reasoning + customer-service conversations | customer service end to end | yes |
+| `reas_fc.toml` | reasoning + multi-turn function calling | function calling end to end | yes |
+| `code_fc.toml` | code + multi-turn function calling | function calling end to end | yes |
+| `code_agent.toml` | code + customer-service conversations | customer service end to end | yes |
+| `reas_code.toml` | reasoning + code | none | no |
+
+Shared settings are in `base.toml`. Do not change them (CLAUDE.md, rule 6).
+
+## Design
+
+- **Data:** two domain lists, all of their rows, each in its own order, interleaved so that every prefix holds about half
+  the packed training tokens of each domain. The lists are in `data/subsets/<name>/`; `SUBSET.json` describes each one.
+- **Training:** on-policy distillation. The NVFP4 student generates its own answers with vLLM at deployment sampling
+  (T 0.6, top-p 0.95, top-k 20). The trainer then minimises the full-vocabulary forward KL to the BF16 teacher on those
+  answers.
+  - The trainer uses a fake-quant NVFP4 student. Its step 0 equals the released `nvidia/Qwen3-8B-NVFP4` checkpoint bit
+    for bit.
+  - After every step the new weights are pushed into the vLLM servers.
+  - 36 packs of 131,072 tokens per step; learning rate 1e-5 after a 5-step warmup.
+- **Budgets:** WSD schedule with three budgets.
+
+  | Budget | Decay at the end | Branches from |
+  |---|---|---|
+  | 60 steps | 15 steps | — |
+  | 120 steps | 20 steps | step 45 of the 60-step run |
+  | 180 steps | 30 steps | step 100 of the 120-step run |
+
+  Each budget therefore equals a run of that length from scratch, and the chain trains 60 + 75 + 80 = 215 steps in all.
+- **Multi-turn data:** played end to end. The student writes every assistant turn; a language model plays the user
+  (customer service: from an offline scenario card) and simulates the tools.
+
+## Requirements
+
+- Setup done and `python3 tools/check_env.py` all `ok` (warnings about the host only), on every node used.
+- **Simulator API** for the four pairs with multi-turn data, and for `smoke_mt.toml`: an OpenAI-compatible endpoint
+  serving **gpt-oss-120b** (reasoning effort low; the launcher sends it). Set:
+
+  ```bash
+  export QADX_API_BASE=https://<endpoint>/v1   # must end in /v1
+  export QADX_API_KEY=...                      # a second key in QADX_API_KEY_2 doubles the throughput
+  export QADX_SIM_MODEL=<the endpoint's model id for gpt-oss-120b>    # default "openai/gpt-oss-120b"
+  export QADX_API_RPS=1.0                      # requests per second per key; raise it if the endpoint allows
+  ```
+
+  Each multi-turn step makes a few hundred simulator calls. The API rate, not the GPUs, usually sets the step time of
+  these four pairs.
+- **Disk:** about 500 GB free under `out/` per chain while it trains (two full checkpoints with optimizer state plus the
+  weights-only checkpoints of the budgets). Each export is about 6 GB.
+- Optional: `WANDB_PROJECT` (plus `WANDB_ENTITY` / `WANDB_API_KEY`) to log training to Weights & Biases.
+
+## Order of work
+
+Run every command from the repository root, on the training node.
+
+```bash
+E=experiments/pairs-r2
+# 1. Build the PTQ student once (one GPU, ~10 min; downloads cnn_dailymail for a calibration that does not affect the result).
+python3 train/launch/chain.py $E/reas_code.toml prepare        # any pair config: same model and checkpoint
+# 2. Step 0 must equal the released checkpoint bit for bit (one GPU, ~15 min); read out/check-step0.txt.
+python3 train/launch/chain.py $E/reas_code.toml check-step0
+# 3. Smoke tests of the launcher, about 1 hour and 15 minutes; they are not results.
+python3 train/launch/chain.py $E/smoke.toml run --layout 1node
+python3 train/launch/chain.py $E/smoke_mt.toml run --layout 1node
+# 4. The five chains, one at a time per node (each holds all 8 GPUs of the layout).
+python3 train/launch/chain.py $E/reas_code.toml run --layout 1node
+...
+```
+
+With two nodes, run on the training node and add `--layout 2node --peer <rollout host>`. The rollout node needs
+passwordless ssh from the training node, docker, and this repository at the same path with setup done (images, models).
+`--peer-ip` sets the address the servers are reached at, if `hostname -I` there does not give it first.
+
+`dryrun` writes every segment's controller configuration and trainer command to `out/dryrun/` without starting anything.
+
+### What a run does and leaves behind
+
+- `out/<name>.chain.log`: one line per event. `SEGMENT_DONE` and `EXPORTED` lines mark progress; `CHAIN_STOP` means it
+  stopped on a problem.
+- `out/runs/<segment>/`: controller logs, one line per step and per rollout (`steps.jsonl`, `rollouts.jsonl`, and
+  `episodes.jsonl` for multi-turn data), plus the logs of the controller and the API throttles.
+- `out/train/<segment>/checkpoints/`: trainer checkpoints. Pruned to what later budgets need.
+- `out/exports/<name>-s060`, `-s120`, `-s180`: Hugging Face NVFP4 checkpoints for evaluation.
+
+### When something stops
+
+- The chain stops at the first failure: a trainer exit other than 0, a missing checkpoint, a server that does not come
+  up, or no new step for 120 minutes.
+- The state is left as it is. Report the last lines of `out/<name>.chain.log` and of `docker logs qadx-train-<segment>`.
+- To continue a segment from its newest full checkpoint:
+
+  ```bash
+  python3 train/launch/chain.py $E/<pair>.toml stop --layout 1node
+  python3 train/launch/chain.py $E/<pair>.toml resume <segment> <step> --layout 1node   # step: out/train/<segment>/checkpoints/non_persistent/latest_checkpointed_iteration.txt
+  python3 train/launch/chain.py $E/<pair>.toml run --layout 1node                      # continues with the remaining segments
+  ```
+
+  Do not restart a chain from scratch over an existing `out/` without saying so in the report.
+
+## Evaluation
+
+See the section added by the evaluation setup below.
+
+## What to send back
+
+For each pair:
+- `out/<name>.chain.log`;
+- `out/runs/*/steps.jsonl`;
+- `out/runs/*/controller.json`;
+- the evaluation outputs (see Evaluation);
+- `reports/env_report.md` / `.json` and `git rev-parse HEAD`.
+
+Once per node: `out/check-step0.txt`.

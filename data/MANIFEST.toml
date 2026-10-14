@@ -1,0 +1,29 @@
+# Training data: GitHub release assets of this repository, fetched by `setup/setup.sh data`.
+release = "data-v1"
+repo = "CFC87/qad-exp"
+# Each asset is checked against its sha256 and placed at `path`.
+
+[assets."mix_reas_agent_s20261014.parquet"]
+path = "data/subsets/mix_reas_agent_s20261014/subset.parquet"
+sha256 = "21b02e1661531047dd9699d7e0999fc9c1a05896ad3da28c96294609c63dd558"
+
+[assets."mix_reas_fc_s20261014.parquet"]
+path = "data/subsets/mix_reas_fc_s20261014/subset.parquet"
+sha256 = "230854e26e108774ac36f7a5244c3b732c8c657092c9ce457010636f547f8628"
+
+[assets."mix_code_fc_s20261007.parquet"]
+path = "data/subsets/mix_code_fc_s20261007/subset.parquet"
+sha256 = "9da417ec55919ec6364c2c1b779e87f3f5b9eea0c7f1d3940d2a022b934ef5aa"
+
+[assets."mix_code_agent_s20261010.parquet"]
+path = "data/subsets/mix_code_agent_s20261010/subset.parquet"
+sha256 = "36a707416cc3db7fb216c9b51e9232416360240b07c86c604d618661cda5e7b1"
+
+[assets."mix_reas_code_s20261008.parquet"]
+path = "data/subsets/mix_reas_code_s20261008/subset.parquet"
+sha256 = "ecf9d6b9d2fc354e28ba65f7ea5eb32a4c19cc93b0b7d6837f56586703e78a7d"
+
+[assets."dom_agent_e2e_25k_s20261004.scenario_cards.parquet"]
+path = "data/subsets/dom_agent_e2e_25k_s20261004/scenario_cards_final.parquet"
+sha256 = "df9f7f68f7da37d9f5e44685afe3b2ab584e579a84d30cabcc8815cc83f2887c"
+# one scenario card per customer-service conversation (the simulated customer plays from it), keyed by prompt_id

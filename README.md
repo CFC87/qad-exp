@@ -19,13 +19,14 @@ for anyone).
 ## Setup
 
 ```bash
-setup/setup.sh                    # uv + Python, images, sources, environments, models (all idempotent)
-python3 tools/check_env.py        # verify everything against env/versions.toml
+setup/setup.sh                    # uv + Python, images, sources, environments, models, training data (idempotent)
+python3 tools/check_env.py        # verify everything against env/versions.toml and data/MANIFEST.toml
 ```
 
-`setup/setup.sh <step> ...` runs single steps: `uv`, `images`, `sender`, `sources`, `venvs`, `models`,
+`setup/setup.sh <step> ...` runs single steps: `uv`, `images`, `sender`, `sources`, `venvs`, `models`, `data`,
 `optional-models`. Everything is installed inside the repository (`.tools/`, `.venv-*`, `third_party/`, `models/`,
-`.cache/`); nothing is installed system-wide.
+`data/`, `.cache/`); nothing is installed system-wide. The `data` step downloads the training lists from this
+repository's GitHub release `data-v1` with the GitHub CLI (`gh auth login` first) and checks their sha256.
 
 ## Pinned versions
 
@@ -57,6 +58,24 @@ Each experiment runs on either layout:
 Training uses pipeline parallelism only, so the computation of every layer is the same as in the reference runs;
 evaluation serves every model on single GPUs (tensor parallel 1).
 
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| `env/` | pinned versions (`versions.toml`) and Python lock files |
+| `setup/setup.sh`, `tools/check_env.py` | installation and its verification |
+| `data/` | training lists (`MANIFEST.toml`: release assets and sha256; `subsets/<name>/SUBSET.json`: what each list is) |
+| `train/` | the QAD trainer (runs in the NeMo image), the rollout controller and multi-turn environments (`onpolicy/`), the launcher (`launch/chain.py`), CPU tests (`tests/`) |
+| `eval/` | the evaluation harness (vLLM serving, benchmarks, graders) |
+| `experiments/` | one directory per experiment: README with what to run and send back, configuration files |
+
 ## Experiments
 
-Added per experiment under `experiments/`, each with its own README, configuration and run script.
+- [`experiments/pairs-r2`](experiments/pairs-r2/README.md): five QAD runs on mixtures of two training domains, each a
+  60 / 120 / 180-step WSD chain, every budget evaluated on the full benchmark set.
+
+## Tests without GPUs
+
+```bash
+cd train && for t in tests/test_*.py; do ../.venv-client/bin/python $t || break; done   # needs models/Qwen3-8B and data/
+```

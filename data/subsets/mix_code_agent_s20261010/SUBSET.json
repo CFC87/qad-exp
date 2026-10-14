@@ -1,0 +1,22 @@
+{
+ "name": "mix_code_agent_s20261010",
+ "description": "code + multi-turn customer-service conversations",
+ "train_ranks": [
+  0,
+  75000
+ ],
+ "val_ranks": [
+  75000,
+  75300
+ ],
+ "validation": "300 single-turn prompts shared by every list (ranks val_ranks)",
+ "sources": {
+  "code": "dom_code_50k_s20261004",
+  "agent": "dom_agent_e2e_25k_s20261004"
+ },
+ "packed_tokens_per_prompt": {
+  "code": 12897,
+  "agent": 19213
+ },
+ "rule": "Two domain lists, all their training rows, each in its own order, interleaved by the packed tokens a prompt of each list takes on average during training (row i of a list placed at (i + 0.5) x its cost), so every prefix holds about half the packed tokens of each domain; once the shorter list ends, only the other follows. Columns: the union of both lists plus `domain` and `src_rank`."
+}
