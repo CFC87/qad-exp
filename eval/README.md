@@ -130,6 +130,7 @@ eval/results/
   <arm>/<phase>.status.json        complete or not, what is missing, the phase's tasks and spec version
   <arm>/<bench>.spec               samples per question (k) the benchmark's file was generated with
   <arm>/superseded/k<old>/         files made under an earlier spec (not used)
+eval/reference/baselines.json      reference PTQ / BF16 scores by benchmark and category (spec v2), used by the Report
   <arm>/tau2_<domain>.jsonl / .grades.jsonl / .left_out.jsonl, <arm>/tau2_runs/   tau2 rows and full trajectories
   <arm>/bfcl_mt.jsonl / .grades.jsonl, <arm>/bfcl_runs/                          BFCL rows and bfcl's own result files
   logs/scheduler.log, logs/<arm>_<phase>.log, logs/server_<arm>_<phase>.log, logs/tau2_*, logs/bfcl_*, logs/grade_*
@@ -142,7 +143,9 @@ no-damage checks. Recovery against the baselines is computed from the category s
 
 **Report** = the first section of `summary.md`: one column per arm; the five category scores and every benchmark score
 to two decimals; the repository commit, the evaluation spec, and a last row saying whether every phase is complete under
-the current spec and graded. Report all of it for every arm, as printed. For a chosen set of arms (writes nothing):
+the current spec and graded. With `eval/reference/baselines.json` (the reference PTQ = NVIDIA's NVFP4 release and BF16
+= Qwen3-8B, evaluated under spec v2 with these settings) it also has the columns `PTQ (ref)` and `BF16 (ref)` and a
+`recovery <category>` row per category = (arm − PTQ) / (BF16 − PTQ). Report all of it for every arm, as printed. For a chosen set of arms (writes nothing):
 `.venv-client/bin/python eval/lib/summary.py --arms nvfp4,<arm>,... --report`. **When files can be sent**, send back
 the whole
 `eval/results/` directory (with `tau2_runs/` and `bfcl_runs/`), `reports/env_report.{md,json}`, and the output of

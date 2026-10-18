@@ -13,7 +13,9 @@ baselines (recovery = (arm - PTQ) / (BF16 - PTQ)) are made per question from the
 
 The first section of summary.md, "Report", holds the scores to report: the five category scores and every benchmark
 score to two decimals, one column per arm, with the repository commit, the evaluation spec and whether every phase is
-complete under it and graded. Recovery against the baselines is computed from these category scores.
+complete under it and graded. With eval/reference/baselines.json present (the reference PTQ = NVIDIA's NVFP4 release
+and BF16 = Qwen3-8B, evaluated under the same spec), the Report also shows those two columns and each category's recovery
+= (arm - PTQ) / (BF16 - PTQ).
 
     summary.py --results DIR [--arms a,b] [--report]     (--report: print only the Report for these arms, write nothing)
 """
@@ -111,6 +113,17 @@ def commit():
         return "unknown"
 
 
+REF = paths.EVAL / "reference" / "baselines.json"
+
+
+def reference():
+    """The reference PTQ / BF16 scores, if they were made under the current spec."""
+    if not REF.exists():
+        return None
+    r = json.load(open(REF))
+    return r if r.get("spec_version") == P.SPEC_VERSION else None
+
+
 def report(out):
     """Rows = categories and benchmarks (k = samples per question under the current spec), columns = arms; last row:
     every phase complete under the current spec and every benchmark graded."""
@@ -118,17 +131,27 @@ def report(out):
     k["tau2"] = k["tau2_retail"]
     f2 = lambda v: "—" if v is None else f"{v:.2f}"  # noqa: E731
     arms = list(out)
-    L = ["## Report", "", f"Commit {commit()} · evaluation spec v{P.SPEC_VERSION} · scores in %, two decimals", "",
-         "| | " + " | ".join(arms) + " |", "|---|" + "---|" * len(arms)]
+    ref = reference()
+    rc = [ref["arms"]["ptq"], ref["arms"]["bf16"]] if ref else []
+    head = (["PTQ (ref)", "BF16 (ref)"] if ref else []) + arms
+    L = ["## Report", "", f"Commit {commit()} · evaluation spec v{P.SPEC_VERSION} · scores in %, two decimals"
+         + (" · PTQ / BF16 (ref): eval/reference/baselines.json" if ref else " · no reference baselines for this spec"), "",
+         "| | " + " | ".join(head) + " |", "|---|" + "---|" * len(head)]
     for c in CATS:
-        L.append(f"| **{c}** | " + " | ".join(f2(out[x]["categories"][c]) for x in arms) + " |")
+        L.append(f"| **{c}** | " + " | ".join([f2(r["categories"][c]) for r in rc] + [f2(out[x]["categories"][c]) for x in arms]) + " |")
+    if ref:
+        for c in CATS:
+            p_, b_ = rc[0]["categories"][c], rc[1]["categories"][c]
+            v = [out[x]["categories"][c] for x in arms]
+            L.append(f"| recovery {c} | | | " + " | ".join("—" if y is None else f"{(y - p_) / (b_ - p_):.3f}" for y in v) + " |")
     for b in COMPS + ["gpqa_diamond", "lcb_v6", "lcb_pro", "longbench_pro", "mrcr8", "bfcl_mt", "tau2"] + CHECKS:
-        L.append(f"| {b} (k={k[b]}) | " + " | ".join(f2(out[x]["benchmarks"].get(b, {}).get("score")) for x in arms) + " |")
+        L.append(f"| {b} (k={k[b]}) | " + " | ".join([f2(r["benchmarks"].get(b, {}).get("score")) for r in rc]
+                                                      + [f2(out[x]["benchmarks"].get(b, {}).get("score")) for x in arms]) + " |")
     ok = []
     for x in arms:
         bad = [p for p in P.ORDER if out[x]["phases"][p] is not True] + [b for b, d in out[x]["benchmarks"].items() if not d["graded"]]
         ok.append("yes" if not bad else "NO: " + ", ".join(bad))
-    L.append("| complete + graded | " + " | ".join(ok) + " |")
+    L.append("| complete + graded | " + " | ".join(["ref"] * len(rc) + ok) + " |")
     return L + [""]
 
 

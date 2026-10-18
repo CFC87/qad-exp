@@ -186,8 +186,8 @@ The scores, for the NVFP4 environment check and for each pair's three exports: t
 
 Every row as printed: the five categories (reasoning, code, long, bfcl, tau2) and the benchmarks behind them to two
 decimals, the commit / spec line, and the `complete + graded` row (anything other than `yes` is reported as it is, not
-fixed). Recovery is computed from these category scores against the reference PTQ and BF16 baselines, so nothing else
-is needed for it. Also report, per pair, whether the chain finished (`CHAIN_DONE` in `out/<name>.chain.log`) and any
+fixed). The Report also shows the reference PTQ and BF16 (`eval/reference/baselines.json`) and the recovery of every
+category; the environment check's `nvfp4` column is the same checkpoint as `PTQ (ref)`. Also report, per pair, whether the chain finished (`CHAIN_DONE` in `out/<name>.chain.log`) and any
 deviation from this README.
 
 ## What to send back (when files can be sent)

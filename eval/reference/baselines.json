@@ -1,0 +1,198 @@
+{
+ "spec_version": 2,
+ "note": "Reference baselines, evaluated with this harness's settings (spec v2): PTQ = nvidia/Qwen3-8B-NVFP4, BF16 = Qwen/Qwen3-8B, the revisions pinned in env/versions.toml. Scores in % (eval/lib/summary.py definitions). Recovery of a category = (arm - PTQ) / (BF16 - PTQ).",
+ "arms": {
+  "ptq": {
+   "categories": {
+    "reasoning": 46.101010101010104,
+    "code": 32.20911949685535,
+    "long": 25.4193213649295,
+    "bfcl": 32.5,
+    "tau2": 19.334532374100718
+   },
+   "benchmarks": {
+    "aime26": {
+     "score": 58.958333333333336,
+     "questions": 30,
+     "samples": 480
+    },
+    "hmmt_feb25": {
+     "score": 34.791666666666664,
+     "questions": 30,
+     "samples": 480
+    },
+    "hmmt_feb26": {
+     "score": 35.60606060606061,
+     "questions": 33,
+     "samples": 528
+    },
+    "hmmt_nov25": {
+     "score": 46.666666666666664,
+     "questions": 30,
+     "samples": 480
+    },
+    "gpqa_diamond": {
+     "score": 54.48232323232324,
+     "questions": 198,
+     "samples": 3168
+    },
+    "mmlu_redux_1k": {
+     "score": 86.3,
+     "questions": 1000,
+     "samples": 1000
+    },
+    "ifbench": {
+     "score": 35.833333333333336,
+     "questions": 300,
+     "samples": 1200
+    },
+    "lcb_v6": {
+     "score": 45.0,
+     "questions": 175,
+     "samples": 1400
+    },
+    "lcb_pro": {
+     "score": 19.418238993710695,
+     "questions": 159,
+     "samples": 1272
+    },
+    "longbench_pro": {
+     "score": 37.459410202663484,
+     "questions": 1380,
+     "samples": 1380
+    },
+    "mrcr8": {
+     "score": 13.379232527195514,
+     "questions": 100,
+     "samples": 800
+    },
+    "tau2_airline": {
+     "score": 21.5,
+     "questions": 50,
+     "samples": 200
+    },
+    "tau2_retail": {
+     "score": 25.877192982456144,
+     "questions": 114,
+     "samples": 456
+    },
+    "tau2_telecom": {
+     "score": 11.842105263157894,
+     "questions": 114,
+     "samples": 456
+    },
+    "bfcl_mt": {
+     "score": 32.5,
+     "questions": 800,
+     "samples": 3200
+    },
+    "comps": {
+     "score": 43.80081300813008,
+     "questions": 123,
+     "samples": 1968
+    },
+    "tau2": {
+     "score": 19.334532374100718,
+     "questions": 278,
+     "samples": 1112
+    }
+   }
+  },
+  "bf16": {
+   "categories": {
+    "reasoning": 54.17171717171717,
+    "code": 38.81109613656784,
+    "long": 29.879012612393215,
+    "bfcl": 39.625,
+    "tau2": 35.07194244604317
+   },
+   "benchmarks": {
+    "aime26": {
+     "score": 65.625,
+     "questions": 30,
+     "samples": 480
+    },
+    "hmmt_feb25": {
+     "score": 43.541666666666664,
+     "questions": 30,
+     "samples": 480
+    },
+    "hmmt_feb26": {
+     "score": 45.83333333333333,
+     "questions": 33,
+     "samples": 528
+    },
+    "hmmt_nov25": {
+     "score": 55.00000000000001,
+     "questions": 30,
+     "samples": 480
+    },
+    "gpqa_diamond": {
+     "score": 60.858585858585855,
+     "questions": 198,
+     "samples": 3168
+    },
+    "mmlu_redux_1k": {
+     "score": 89.4,
+     "questions": 1000,
+     "samples": 1000
+    },
+    "ifbench": {
+     "score": 35.75,
+     "questions": 300,
+     "samples": 1200
+    },
+    "lcb_v6": {
+     "score": 51.28571428571429,
+     "questions": 175,
+     "samples": 1400
+    },
+    "lcb_pro": {
+     "score": 26.336477987421386,
+     "questions": 159,
+     "samples": 1272
+    },
+    "longbench_pro": {
+     "score": 44.079161016593176,
+     "questions": 1380,
+     "samples": 1380
+    },
+    "mrcr8": {
+     "score": 15.678864208193255,
+     "questions": 100,
+     "samples": 800
+    },
+    "tau2_airline": {
+     "score": 33.0,
+     "questions": 50,
+     "samples": 200
+    },
+    "tau2_retail": {
+     "score": 39.69298245614035,
+     "questions": 114,
+     "samples": 456
+    },
+    "tau2_telecom": {
+     "score": 31.359649122807014,
+     "questions": 114,
+     "samples": 456
+    },
+    "bfcl_mt": {
+     "score": 39.625,
+     "questions": 800,
+     "samples": 3200
+    },
+    "comps": {
+     "score": 52.33739837398373,
+     "questions": 123,
+     "samples": 1968
+    },
+    "tau2": {
+     "score": 35.07194244604317,
+     "questions": 278,
+     "samples": 1112
+    }
+   }
+  }
+ }
+}
