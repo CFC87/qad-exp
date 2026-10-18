@@ -12,9 +12,9 @@ benchmarks; `eval/run.py` runs the jobs over the GPUs of a node, one job per GPU
 
 | Phase | Benchmarks (`bench:k:cap`) | Concurrency | Window | Typical time on one B200 (QAD checkpoint) |
 |---|---|---|---|---|
-| S1 | `aime26:8:38912`, `hmmt_feb26:8:38912`, `hmmt_feb25:8:38912`, `hmmt_nov25:8:38912` | 160 | 40,960 | 1.0 h |
-| S2 | `gpqa_diamond:8:32768`, `ifbench:4:32768`, `mmlu_redux_1k:1:32768` | 160 | 40,960 | 0.6 h |
-| S3 | `lcb_v6:4:32768` | 160 | 40,960 | 0.5 h |
+| S1 | `aime26:16:38912`, `hmmt_feb26:16:38912`, `hmmt_feb25:16:38912`, `hmmt_nov25:16:38912` | 160 | 40,960 | 1.9 h |
+| S2 | `gpqa_diamond:16:32768`, `ifbench:4:32768`, `mmlu_redux_1k:1:32768` | 160 | 40,960 | 1.0 h |
+| S3 | `lcb_v6:8:32768` | 160 | 40,960 | 0.8 h |
 | S4 | `lcb_pro:8:32768` | 160 | 40,960 | 1.2 h |
 | L1 | `longbench_pro:1:32768` | 64 | 131,072, static YaRN x4 | 2.4 h |
 | M | `mrcr8:8:32768` | 64 | 131,072, static YaRN x4 | 0.5 h |
@@ -25,9 +25,16 @@ benchmarks; `eval/run.py` runs the jobs over the GPUs of a node, one job per GPU
 `k` = samples per question (tau2: trials; BFCL: replicates); the cap is per request (tau2 / BFCL: per model turn).
 Times are medians of the reference runs of QAD checkpoints (server start + generation, without grading); NVIDIA's
 NVFP4 release takes about 1.3x and BF16 about 1.8x as long (longer outputs); tau2 also depends on the API.
-One checkpoint is ~9.7 GPU-hours; on 8 GPUs it finishes in ~2.8 h (T1 and T2 share one API key and run one after the
+One checkpoint is ~11.3 GPU-hours; on 8 GPUs it finishes in ~2.8 h (T1 and T2 share one API key and run one after the
 other) plus grading. With several checkpoints the tau2 phases are usually the bottleneck: they run one at a time per API
 key (see `--tau2-per-key`).
+
+**Evaluation spec v2.** The four competitions and GPQA Diamond take 16 samples per question and LiveCodeBench v6 takes
+8 (spec v1: 8, 8 and 4); nothing else changed. Results made under v1 are not extended to the new counts. When a phase
+runs, a benchmark file made with another k is moved to `<arm>/superseded/k<old>/` (with its grades) and the benchmark
+is generated afresh; a phase whose status file was written under v1 (S1, S2, S3) is not counted as complete. So after
+`git pull`, running the same `eval/run.py` command again redoes exactly the changed benchmarks of every arm already
+evaluated and keeps everything else.
 
 Settings common to every phase (`lib/models.py`, `lib/serve.py`, `lib/run_phase.py`):
 - Image `vllm/vllm-openai@sha256:c2914767…` (vLLM 0.29.0, from `env/versions.toml`), tensor parallel 1,
@@ -114,12 +121,15 @@ generations are newer. Ctrl-C stops all jobs and their containers. A job is limi
 
 ```
 eval/results/
-  summary.md, summary.json         scores by benchmark and category per arm (lib/summary.py), phases complete
+  summary.md, summary.json         "Report" (the scores to report), scores by benchmark and category per arm
+                                   (lib/summary.py), phases complete
   timing.jsonl                     generation time and output tokens per benchmark
   <arm>/arm.json                   checkpoint path and sha256 of its config / quant config / tokenizer config, repo commit
   <arm>/<bench>.jsonl              one row per sample: qid, j, prompt / completion tokens, finish_reason, text
   <arm>/<bench>.grades.jsonl       one row per sample: qid, j, correct (0/1, or a score in [0, 1]), why
-  <arm>/<phase>.status.json        complete or not, what is missing
+  <arm>/<phase>.status.json        complete or not, what is missing, the phase's tasks and spec version
+  <arm>/<bench>.spec               samples per question (k) the benchmark's file was generated with
+  <arm>/superseded/k<old>/         files made under an earlier spec (not used)
   <arm>/tau2_<domain>.jsonl / .grades.jsonl / .left_out.jsonl, <arm>/tau2_runs/   tau2 rows and full trajectories
   <arm>/bfcl_mt.jsonl / .grades.jsonl, <arm>/bfcl_runs/                          BFCL rows and bfcl's own result files
   logs/scheduler.log, logs/<arm>_<phase>.log, logs/server_<arm>_<phase>.log, logs/tau2_*, logs/bfcl_*, logs/grade_*
@@ -128,7 +138,13 @@ eval/results/
 Scores: benchmark score = mean over questions of the per-question mean over samples. Categories: reasoning (AIME 2026,
 three HMMT sets, GPQA; equal weights), code (LiveCodeBench v6, LiveCodeBench Pro without its 5 interactive problems),
 long context (LongBench Pro, MRCR), BFCL, tau2 (tasks of the three domains pooled); MMLU-Redux and IFBench are
-no-damage checks. Recovery against the baselines is computed from the per-sample grades. **Send back** the whole
+no-damage checks. Recovery against the baselines is computed from the category scores.
+
+**Report** = the first section of `summary.md`: one column per arm; the five category scores and every benchmark score
+to two decimals; the repository commit, the evaluation spec, and a last row saying whether every phase is complete under
+the current spec and graded. Report all of it for every arm, as printed. For a chosen set of arms (writes nothing):
+`.venv-client/bin/python eval/lib/summary.py --arms nvfp4,<arm>,... --report`. **When files can be sent**, send back
+the whole
 `eval/results/` directory (with `tau2_runs/` and `bfcl_runs/`), `reports/env_report.{md,json}`, and the output of
 `git rev-parse HEAD` and `git status`.
 

@@ -5,7 +5,9 @@
 Completion benchmarks go through /v1/completions with the chat template rendered client-side by the checkpoint's own
 tokenizer (transformers from the client lock), so the prompt tokens are identical across arms and machines. Every
 (question, sample) request is shuffled with a seed derived from the benchmark name only, so all arms send requests in the
-same order. Results are appended per sample to <results>/<arm>/<bench>.jsonl; a rerun skips the samples already there.
+same order. Results are appended per sample to <results>/<arm>/<bench>.jsonl; a rerun skips the samples already there,
+unless the file was made with another number of samples per question (an earlier evaluation spec, phases.py): then it is
+moved to <arm>/superseded/k<old>/ and the benchmark is generated afresh, never extended.
 tau2 and BFCL run their own clients against the same server (run_tau2 / run_bfcl).
 Exit code 0 when every sample of the phase is present, 3 when the phase finished incomplete.
 """
@@ -104,12 +106,38 @@ def done_samples(out_path):
     return done
 
 
+def made_with_k(arm, bench, k):
+    """The k the existing <bench>.jsonl of arm was generated with: its .spec stamp, else (no stamp: written under spec
+    v1) phases.V1_K; None when there is no file."""
+    d = RES / arm
+    if not (d / f"{bench}.jsonl").exists():
+        return None
+    stamp = d / f"{bench}.spec"
+    return int(json.loads(stamp.read_text())["k"]) if stamp.exists() else P.V1_K.get(bench, k)
+
+
+def start_bench(arm, bench, k):
+    """Before generating: a file made with another k is moved to <arm>/superseded/k<old>/ (with its grades and stamp),
+    so the benchmark starts afresh; then the stamp records k."""
+    d = RES / arm
+    d.mkdir(parents=True, exist_ok=True)
+    old = made_with_k(arm, bench, k)
+    if old is not None and old != k:
+        dst = d / "superseded" / f"k{old}"
+        dst.mkdir(parents=True, exist_ok=True)
+        for f in (d / f"{bench}.jsonl", d / f"{bench}.grades.jsonl", d / f"{bench}.spec"):
+            if f.exists():
+                shutil.move(str(f), str(dst / f.name))
+        log(f"{arm}/{bench}: results made with k={old} moved to {dst}; generating k={k} afresh")
+    (d / f"{bench}.spec").write_text(json.dumps(dict(k=k, spec_version=P.SPEC_VERSION)) + "\n")
+
+
 async def generate(arm, bench, k, max_tokens, concurrency, tok, gpu, max_model_len, limit=None):
     import aiohttp
 
     items = load_items(bench, limit)
     out_path = RES / arm / f"{bench}.jsonl"
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    start_bench(arm, bench, k)
     done = done_samples(out_path)
     order = task_order(bench, items, k, done)
     log(f"{arm}/{bench}: {len(items)} questions x k={k}, {len(done)} already done, {len(order)} to run")
@@ -174,7 +202,7 @@ def first_requests(phase, tok, limit=None, arm=None):
     for spec in P.specs(phase):
         bench, k, mt = spec.split(":")
         items = load_items(bench, limit)
-        done = done_samples(RES / arm / f"{bench}.jsonl") if arm else set()
+        done = done_samples(RES / arm / f"{bench}.jsonl") if arm and made_with_k(arm, bench, int(k)) == int(k) else set()
         order = task_order(bench, items, int(k), done)
         if not order:
             out.append((bench, None, None))
@@ -422,7 +450,8 @@ def complete_bfcl(arm, phase, limit=None):
 
 def write_status(arm, phase, t0, missing, rc=None):
     st = dict(arm=arm, phase=phase, complete=not missing, missing=missing, seconds=round(time.time() - t0),
-              finished=time.strftime("%Y-%m-%dT%H:%M:%S"), exit_code=rc)
+              finished=time.strftime("%Y-%m-%dT%H:%M:%S"), exit_code=rc, tasks=P.PHASES[phase]["tasks"],
+              spec_version=P.SPEC_VERSION)
     (RES / arm / f"{phase}.status.json").write_text(json.dumps(st, indent=1) + "\n")
     return st
 

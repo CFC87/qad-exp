@@ -13,6 +13,13 @@ WSD chain whose 60-, 120- and 180-step budgets are exported and evaluated on the
 
 Shared settings are in `base.toml`. Do not change them (CLAUDE.md, rule 6).
 
+> **Evaluation spec v2 (update).** The four competitions and GPQA Diamond now take 16 samples per question and
+> LiveCodeBench v6 takes 8 (were 8, 8 and 4); nothing else in the evaluation or the training changed. After `git pull`,
+> rerun the evaluation commands below for every arm already evaluated (the NVFP4 environment check included), exactly
+> as before: the changed benchmarks (phases S1, S2, S3) are regenerated from scratch, the files made under the old
+> counts are moved to `eval/results/<arm>/superseded/`, and every other phase is kept. Report only results made
+> under v2 (the Report line says `evaluation spec v2`). See [`eval/README.md`](../../eval/README.md).
+
 ## Design
 
 - **Data:** two domain lists, all of their rows, each in its own order, interleaved so that every prefix holds about half
@@ -145,7 +152,7 @@ simulator. The same `QADX_API_*` variables are used, so set them to the gpt-5.2 
    training results are interpreted.
 
    ```bash
-   nohup .venv-client/bin/python eval/run.py --arm nvfp4 > eval-nvfp4.log 2>&1 &     # ~3-4 h on 8 GPUs
+   nohup .venv-client/bin/python eval/run.py --arm nvfp4 > eval-nvfp4.log 2>&1 &     # ~3-4 h on 8 GPUs (rerun after the v2 update: ~2.5 h)
    ```
 
 2. **After each chain:** its three exports, all phases.
@@ -168,7 +175,22 @@ Rough time per pair on one node: training 1-1.5 days (the four multi-turn pairs 
 then evaluation about half a day. With two nodes, running two pairs at the same time (each on its own node with
 `--layout 1node`) finishes the five pairs sooner than running each pair on both nodes.
 
-## What to send back
+## What to report
+
+The scores, for the NVFP4 environment check and for each pair's three exports: the **Report** section of
+`eval/results/summary.md` (see `eval/README.md`, Outputs), printed for those arms with
+
+```bash
+.venv-client/bin/python eval/lib/summary.py --arms nvfp4,$P-s060,$P-s120,$P-s180 --report
+```
+
+Every row as printed: the five categories (reasoning, code, long, bfcl, tau2) and the benchmarks behind them to two
+decimals, the commit / spec line, and the `complete + graded` row (anything other than `yes` is reported as it is, not
+fixed). Recovery is computed from these category scores against the reference PTQ and BF16 baselines, so nothing else
+is needed for it. Also report, per pair, whether the chain finished (`CHAIN_DONE` in `out/<name>.chain.log`) and any
+deviation from this README.
+
+## What to send back (when files can be sent)
 
 - **Once per node:**
   - `out/check-step0.txt`;

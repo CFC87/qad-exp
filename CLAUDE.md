@@ -101,6 +101,8 @@ Each experiment directory under `experiments/` has a README: read it fully befor
 ## Reporting results
 
 - Each experiment writes its outputs under its own directory, as its README describes.
+- Scores are reported as the **Report** section of `eval/results/summary.md` (`eval/lib/summary.py --arms ... --report`),
+  every row as printed, for every arm the experiment README lists. Do not recompute, round, select or reformat them.
 - With every set of results, send `reports/env_report.md` and `reports/env_report.json` from the same machine. Also
   send the repository commit (`git rev-parse HEAD`), and say whether anything was changed locally (`git status`).
 - If a run needed any deviation from these rules, state it explicitly next to the results. Results with an undisclosed

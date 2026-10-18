@@ -187,8 +187,13 @@ def bind_arm(results, arm, ckpt):
 
 
 def phase_complete(results, job):
+    """Complete under the current spec: a status file without a tasks field was written under spec v1 (phases.V1_TASKS)."""
     f = Path(results) / job.arm / f"{job.phase}.status.json"
-    return f.exists() and json.load(open(f)).get("complete") is True
+    if not f.exists():
+        return False
+    st = json.load(open(f))
+    tasks = st.get("tasks", P.V1_TASKS.get(job.phase, P.PHASES[job.phase]["tasks"]))
+    return st.get("complete") is True and tasks == P.PHASES[job.phase]["tasks"]
 
 
 class Grader(threading.Thread):
