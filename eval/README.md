@@ -73,7 +73,8 @@ Settings common to every phase (`lib/models.py`, `lib/serve.py`, `lib/run_phase.
   export QADX_TAU2_MODEL_PREFIX=""
   ```
   Do not substitute another model: the user simulator changes tau2 scores. All tau2 API calls go through a local rate
-  limiter (`lib/api_throttle.py`) that waits and retries on 429 / 5xx instead of failing the conversation.
+  limiter (`lib/api_throttle.py`) that waits and retries on 429 / 5xx instead of failing the conversation; see
+  [tau2 API errors and retries](#tau2-api-errors-and-retries).
 - CPU: grading runs on the node (LiveCodeBench v6 runs 24 worker processes; LiveCodeBench Pro judges in a container).
 - Disk: about 1 GB of outputs per checkpoint (generations, tau2 / BFCL trajectories).
 
@@ -114,8 +115,41 @@ Options of `run.py`:
 
 Interruptions: run the same command again. Finished samples are skipped (generations are appended per sample; BFCL skips
 finished entries; an interrupted tau2 domain resumes with tau2's `--auto-resume`; tau2 conversations that an API error
-ended are re-run with their original seeds), phases marked complete are not restarted, grading is redone where the
-generations are newer. Ctrl-C stops all jobs and their containers. A job is limited to 12 h.
+ended are re-run with their original seeds, a fallback only: see the next section), phases marked complete are not
+restarted, grading is redone where the generations are newer. Ctrl-C stops all jobs and their containers. A job is limited to 12 h.
+
+## tau2 API errors and retries
+
+A tau2 score counts every (task, trial) exactly once, with a conversation that ran to its end. An error is handled
+according to who caused it.
+
+- **The model under test**: an agent reply with neither text nor a tool call, or a prompt longer than the 40,960 window
+  of the local server.
+  - The conversation scores 0 and is never re-run.
+  - This is also why tau2's `--max-retries` stays 0. tau2's own retry re-runs every failed conversation, the model's own
+    failures included, so it can only turn failures into successes.
+- **The API side**: the user simulator or the retail judge, with rate limits, timeouts, connection resets or server
+  errors.
+  - These are retried **per request, inside the conversation**. `lib/api_throttle.py` waits and retries every 429,
+    500, 502, 503, 504 and 529 and every connection error or timeout, for up to 3 hours.
+  - The conversation only pauses, and the retry does not decide which conversations are kept.
+  - Anything between the throttle and the model provider (a proxy or bridge) must do the same for its own transient
+    errors, or pass them on with one of those statuses so that the throttle retries them. A transient error that
+    reaches tau2 under another status (for example a throttling error returned as 400) ends the conversation.
+- **A conversation that an API error still ended** is a fallback case.
+  - It is left out of scoring (`<arm>/tau2_<domain>.left_out.jsonl`), and the next `eval/run.py` re-runs it with its
+    original seed. Each such re-run leaves a backup `tau2_runs/simulations/<domain>/results.before_rerun_<time>.json`.
+  - The re-run keeps the set complete, but the result is no longer equal to a clean run. An API error is more likely to
+    hit a long conversation (more calls), so the conversations that end up kept lean towards those that finished without
+    one. The more conversations were re-run, the larger the lean.
+  - Expected: 0 per arm and domain. Report the number with the scores: conversations ended by an API error, re-run, and
+    still left out, per arm and domain.
+  - If it is not 0, report it, with the error texts from `left_out.jsonl`, before doing anything else.
+    - Transient errors (rate limit, timeout, 5xx, connection): the fix is in the transport, which must retry them. After
+      that fix, regenerate the arm's tau2 phases from scratch. Move `tau2_runs/simulations/<domain>/` and
+      `tau2_<domain>.*` of that arm to `<arm>/superseded/tau2-<date>/`, then run
+      `eval/run.py --arm ... --phases T1,T2 --force`.
+    - Other errors (content filter, invalid request): report them with their texts; do not re-run.
 
 ## Outputs
 
@@ -162,7 +196,7 @@ the whole
 | LiveCodeBench Pro | official extractor + LightCPVerifier judge (`eval/setup_judge.sh`), tests at a pinned revision | `.venv-client` + Docker |
 | IFBench | official evaluation_lib, prompt-level loose, on the text after `</think>` | IFBench's env |
 | LongBench Pro | official metric functions on the text after `</think>` | `.venv-tools` |
-| tau2 | tau2's reward; empty agent reply / context overflow = 0; API-side failures left out and re-run | tau2's env |
+| tau2 | tau2's reward; empty agent reply / context overflow = 0; API errors retried per request (a conversation one still ended: left out, re-run, reported) | tau2's env |
 | BFCL | bfcl's own multi-turn checker | `.venv-bfcl` |
 
 Grading starts after each phase, one grading job at a time; LiveCodeBench Pro is graded at the end, when no server runs

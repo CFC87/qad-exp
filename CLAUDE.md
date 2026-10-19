@@ -95,6 +95,9 @@ Each experiment directory under `experiments/` has a README: read it fully befor
 - External model APIs (the multi-turn simulator during training, the τ² user simulator during evaluation) are
   configured only through environment variables, never in files. Each experiment README names the variables and the
   model each one must serve. If the person you work with has not provided them, ask; do not substitute another model.
+- τ² API errors (user simulator, judge) are retried per request by the transport, never by re-running conversations.
+  A conversation an API error still ended is a fallback case that must be counted and reported (`eval/README.md`, "tau2
+  API errors and retries").
 - Long runs: launch them with `nohup ... &` or in `tmux`, and follow `out/<name>.chain.log`. A `CHAIN_STOP` line means
   the chain stopped on a problem: report it (rule 3).
 
@@ -105,5 +108,7 @@ Each experiment directory under `experiments/` has a README: read it fully befor
   every row as printed, for every arm the experiment README lists. Do not recompute, round, select or reformat them.
 - With every set of results, send `reports/env_report.md` and `reports/env_report.json` from the same machine. Also
   send the repository commit (`git rev-parse HEAD`), and say whether anything was changed locally (`git status`).
+- For τ², also report per arm and domain how many conversations an API error ended, how many were re-run and how many
+  are still left out (expected 0 each).
 - If a run needed any deviation from these rules, state it explicitly next to the results. Results with an undisclosed
   deviation cannot be compared.
