@@ -493,8 +493,8 @@ class Chain:
             if n % 10 == 0:
                 self.trim(i)
             n += 1
-            # the parse service (stateless) must stay up: without it every multi-turn episode of the model ends as an
-            # environment error and is requeued, so customer service would silently drop out of the steps
+            # the parse service (stateless) must stay up: without it every multi-turn episode of the model ends as
+            # "dropped: generation error" and is requeued, so the multi-turn domains would silently drop out of the steps
             parse_down = 0 if not parse or http_ok(parse) else parse_down + 1
             if parse_down == 3:
                 self.log("parse service not answering for 3 min: restarted (docker logs qadx-parse)")

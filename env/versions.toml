@@ -77,8 +77,8 @@ used_for = "data preparation, Hugging Face CLI, LongBench Pro metrics"
 lock = "env/locks/bfcl.lock.txt"
 used_for = "BFCL multi-turn client (bfcl-eval 2026.3.23)"
 
-# Model weights under models/<dir>, at exact Hugging Face revisions. Current experiments use only Qwen3-8B and
-# Qwen3-8B-NVFP4; the others are optional (setup/setup.sh optional-models) and pinned for later experiments.
+# Model weights under models/<dir>, at exact Hugging Face revisions. Qwen3-8B and Qwen3-8B-NVFP4 are installed by
+# default; the others are optional (setup/setup.sh optional-models) and used by experiments/round4 (gpt-oss-120b by none).
 [models.Qwen3-8B]
 repo = "Qwen/Qwen3-8B"
 revision = "b968826d9c46dd6066d109eabc6255188de91218"

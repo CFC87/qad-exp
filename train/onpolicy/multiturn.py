@@ -192,8 +192,8 @@ def parse_assistant_n3(text, tools=None):
     chat template renders tool_call.arguments|items, as vLLM's chat path converts them)."""
     import requests
     txt = text.split('<|im_end|>')[0]
-    # the service down or failing is an environment error (raised: the episode ends as one, logged as such), not an
-    # unparsable turn of the model
+    # the service down or failing is not an unparsable turn of the model: raised, so the episode ends as
+    # "dropped: generation error" and its prompt is generated again in a later step
     r = requests.post(PARSE_URL + '/parse', json={'text': txt, 'tools': tools or []}, timeout=120)
     if r.status_code != 200:
         raise RuntimeError('parse service: HTTP %d %s' % (r.status_code, r.text[:200]))

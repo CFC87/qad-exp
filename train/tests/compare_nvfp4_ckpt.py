@@ -62,8 +62,12 @@ def main():
         print('%-15s %4d tensors, %4d bitwise equal%s%s' % (t, s['n'], s['equal'],
               (' (%d of them equal in value, other dtype)' % s['dtype_only']) if s.get('dtype_only') else '',
               ('; worst %s: %s' % s['worst']) if s['worst'] else ''))
-    print('only in A: %d %s' % (len(only_a), only_a[:5]))
-    print('only in B: %d %s' % (len(only_b), only_b[:5]))
+    for side, only in (('A', only_a), ('B', only_b)):  # counted by kind: only 5 names are printed
+        by = defaultdict(int)
+        for k in only:
+            by[kind(k)] += 1
+        print('only in %s: %d%s %s' % (side, len(only), (' (%s)' % ', '.join('%s %d' % kv for kv in sorted(by.items()))) if by else '',
+                                       only[:5]))
 
 
 if __name__ == '__main__':

@@ -9,7 +9,7 @@ for anyone).
 
 ## Requirements
 
-- 1 or 2 nodes, 8x NVIDIA B200 each.
+- 1 or 2 nodes per training run, 8x NVIDIA B200 each (`experiments/round4`: three nodes, one model each).
 - Ubuntu 24.04, NVIDIA driver 580.126.09 (CUDA 13.0), Docker with the NVIDIA Container Toolkit, `git`, `curl`,
   `python3` >= 3.11.
 - Docker access to `nvcr.io` for the NeMo image (if the pull is refused: `docker login nvcr.io`, user `$oauthtoken`,
@@ -20,8 +20,8 @@ for anyone).
 - Disk:
   - about 100 GB of docker images, plus about 55 GB in the repository (environments, the default models, training and
     evaluation data, including 13 GB of unpacked LiveCodeBench Pro test cases);
-  - about 500 GB per training chain while it runs, which `chain.py clean` frees after its exports (see the experiment
-    README).
+  - about 500 GB per Qwen3-8B training chain while it runs, up to about 1.4 TB for the 30B-class models of
+    `experiments/round4`; `chain.py clean` frees it after the exports (see the experiment README).
 
 ## Setup
 
@@ -35,10 +35,11 @@ python3 tools/check_env.py        # verify everything; writes reports/env_report
 `setup/setup.sh <step> ...` runs single steps:
 - `uv`, `images`, `sender`, `sources`, `venvs`: the tools, images, third-party code and Python environments;
 - `models`: the models;
-- `data`: the training lists, from this repository's release `data-v1`;
+- `data`: the training lists, from this repository's releases `data-v1` and `data-v2`;
 - `eval-data`: the evaluation files. The two gated sets are rebuilt with `HF_TOKEN`;
 - `judge`: the LiveCodeBench Pro judge image;
-- `optional-models`: models not needed by the current experiments.
+- `optional-models`: Qwen3-30B-A3B and the two Nemotrons with their NVFP4 releases (needed by `experiments/round4`),
+  and gpt-oss-120b (not used by any experiment).
 
 Everything is installed inside the repository: `.tools/`, `.venv-*`, `third_party/`, `models/`, `data/`, `eval/data/`,
 `.cache/`. Nothing is installed system-wide. Every downloaded file is checked against a pinned commit, digest,

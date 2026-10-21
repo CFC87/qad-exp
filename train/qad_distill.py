@@ -47,11 +47,12 @@ contexts, on-policy training).
    (amax = weight_scale_2 * 6 * 448; NVIDIA's one shared value per layer and projection, max over the experts -- a
    quantize.py PTQ calibrates every expert on its own max|W_e|), shared experts as dense MLPs. The loaded amax is kept
    by ModelOpt's restore (no re-calibration), so resumes and exports carry it.
-20. CL_MOE_PAD_ID=<token id>: MoE models get padding_mask = (tokens == id) in their forward, so the pack padding (the
-   rollout's pad id) neither counts for the router expert-bias update nor enters the auxiliary load-balancing loss
-   (Megatron-Bridge passes no padding_mask; the packs' padding tails and empty packs would otherwise drive the bias of
-   the experts the pad token routes to). With pad = eos (Nemotron 3 Nano: <|im_end|>, 11) the real end-of-turn tokens
-   are left out as well (~0.1 % of the tokens), which only touches the routing statistics.
+20. CL_MOE_PAD_ID=<token id>: MoE models get a padding_mask in their forward that covers each pack's padding tail (the
+   trailing run of the rollout's pad id, from where position_ids restart at 0 inside it), so the pack padding neither
+   counts for the router expert-bias update nor enters the auxiliary load-balancing loss (Megatron-Bridge passes no
+   padding_mask; the packs' padding tails and empty packs would otherwise drive the bias of the experts the pad token
+   routes to). The pad id also occurs inside samples (Nemotron 3 Nano's is <|im_end|>, 11, which ends every message):
+   those tokens are real and stay in.
 
 Usage: same arguments as distill.py, run from examples/megatron_bridge (the container's working directory).
 """
