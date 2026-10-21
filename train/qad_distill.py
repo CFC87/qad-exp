@@ -75,15 +75,30 @@ if _MOE_PAD:  # 20.: pack padding out of the MoE router statistics
     import inspect as _inspect
     _MOE_PAD = int(_MOE_PAD)
 
+    def _pack_padding(ids, pos):
+        # the pack's padding is its tail after the last sample (packing.to_batch): all pad id, position_ids restarting at
+        # 0. The pad id also occurs inside samples (Nemotron 3 Nano's is <|im_end|>, which ends every message; Qwen3's
+        # <|endoftext|> can end a response): those tokens are real. So the padding starts at the first position 0 inside
+        # the trailing run of pad ids (a sample never starts with the pad id); no position_ids: the whole trailing run
+        S = ids.shape[-1]
+        idx = _torch.arange(S, device=ids.device).expand_as(ids)
+        run = idx > _torch.where(ids.ne(_MOE_PAD), idx, _torch.full_like(idx, -1)).max(dim=-1, keepdim=True).values
+        if pos is None:
+            return run
+        start = _torch.where(run & pos.eq(0), idx, _torch.full_like(idx, S)).min(dim=-1, keepdim=True).values
+        return idx >= start
+
     def _with_padding_mask(cls):
         orig = cls.forward
-        assert "padding_mask" in _inspect.signature(orig).parameters, "%s.forward takes no padding_mask" % cls.__name__
+        params = list(_inspect.signature(orig).parameters)
+        assert "padding_mask" in params and params[1:3] == ["input_ids", "position_ids"], "%s.forward: %s" % (cls.__name__, params)
 
         def forward(self, *args, **kwargs):
             if kwargs.get("padding_mask") is None and getattr(self.config, "num_moe_experts", None):
                 ids = kwargs.get("input_ids", args[0] if args else None)
+                pos = kwargs.get("position_ids", args[1] if len(args) > 1 else None)
                 if ids is not None:
-                    kwargs["padding_mask"] = ids.eq(_MOE_PAD)
+                    kwargs["padding_mask"] = _pack_padding(ids, pos)
             return orig(self, *args, **kwargs)
 
         cls.forward = forward

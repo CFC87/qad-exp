@@ -289,7 +289,7 @@ class Chain:
         if http_ok(url + "/health"):
             self.die(f"port {PARSE_PORT} is already served (a parse service from an earlier run?): run `stop` first")
         sh(["docker", "rm", "-f", "qadx-parse"], check=False, quiet=True)
-        sh(["docker", "run", "-d", "--name", "qadx-parse", "--net=host", "--entrypoint", "python3",
+        sh(["docker", "run", "-d", "--name", "qadx-parse", "--net=host", "--restart", "unless-stopped", "--entrypoint", "python3",
             "-v", f"{self.models / self.cfg['checkpoint']}:/tok:ro", "-v", f"{ONPOLICY}:/ops:ro", IMG_VLLM,
             "/ops/parse_service.py", "--port", str(PARSE_PORT), "--parser", self.spec["parse"]], capture=True)
         for _ in range(60):
@@ -487,10 +487,20 @@ class Chain:
         f = self.out / "runs" / s / "steps.jsonl"
         last, since, n = -1, time.time(), 0
         stall = self.cfg.get("stall_min", 120) * 60
+        parse = f"http://127.0.0.1:{PARSE_PORT}/health" if self.spec.get("parse") and self.cfg.get("multiturn") else None
+        parse_down = 0
         while self.state(i) == "running":
             if n % 10 == 0:
                 self.trim(i)
             n += 1
+            # the parse service (stateless) must stay up: without it every multi-turn episode of the model ends as an
+            # environment error and is requeued, so customer service would silently drop out of the steps
+            parse_down = 0 if not parse or http_ok(parse) else parse_down + 1
+            if parse_down == 3:
+                self.log("parse service not answering for 3 min: restarted (docker logs qadx-parse)")
+                sh(["docker", "restart", "qadx-parse"], check=False, quiet=True)
+            elif parse_down >= 6:
+                self.die("parse service down after a restart (docker logs qadx-parse): the trainer keeps running; report this")
             sz = f.stat().st_size if f.exists() else 0
             if sz != last:
                 last, since = sz, time.time()
