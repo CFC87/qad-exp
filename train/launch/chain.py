@@ -501,6 +501,8 @@ class Chain:
         (self.out / "runs" / s).mkdir(parents=True, exist_ok=True)
         sh(["docker", "logs", "--tail", "200", f"qadx-train-{s}"], check=False, capture=True, quiet=True,
            stdout_file=self.out / "runs" / s / "trainer_tail.log")
+        sh(["docker", "logs", f"qadx-train-{s}"], check=False, capture=True, quiet=True,
+           stdout_file=self.out / "runs" / s / "trainer.log")  # the whole log: the container is removed below
         if code != "0":
             self.die(f"{s}: the trainer exited with {code} (docker logs qadx-train-{s})")
         it = f"iter_{self.budgets[i]:07d}"
@@ -514,6 +516,7 @@ class Chain:
         sh(["docker", "rm", "-f", f"qadx-train-{s}"], check=False, quiet=True)
         self.kill_spawned(self.out / "runs" / s)
         self.servers_down(L)
+        sh(["docker", "rm", "-f", "qadx-parse"], check=False, quiet=True)  # started again by the next launch
         (self.out / "runs" / s / "CHAIN_DONE").write_text(json.dumps(dict(run=s, steps=self.budgets[i], keep_full=k,
                                                                           done=datetime.now(timezone.utc).isoformat(timespec="seconds"))))
         self.log(f"SEGMENT_DONE {s}: {it}" + (f", full checkpoint at {k} kept" if k is not None else ""))
@@ -635,17 +638,23 @@ class Chain:
             self.log(f"building the start checkpoint {ck} (CPU)")
             mo = REPO / "third_party" / "Model-Optimizer"
             sp = "/opt/venv/lib/python3.12/site-packages"
+            tmp = f"/models/{self.cfg['checkpoint']}.build"  # moved to models/<checkpoint> only after every tensor matched
+            root_m = lambda c: sh(["docker", "run", "--rm", "-v", f"{self.models}:/models", "--entrypoint", "bash", IMG_NEMO, "-c", c],
+                                  check=False, capture=True, quiet=True)
+            root_m(f"rm -rf {tmp} /models/{self.cfg['checkpoint']}")
             out = sh(["docker", "run", "--rm", "--entrypoint", "python3", "-v", f"{mo}/modelopt:{sp}/modelopt:ro",
                       "-v", f"{self.models}:/models", "-v", f"{REPO / 'train'}:/train:ro", IMG_NEMO, "/train/prep/build_ptqs.py",
                       "--bf16", f"/models/{self.model}", "--release", f"/models/{self.spec['release']}",
-                      "--configs", f"/train/prep/ptqs/{self.cfg['checkpoint']}", "--out", f"/models/{self.cfg['checkpoint']}",
+                      "--configs", f"/train/prep/ptqs/{self.cfg['checkpoint']}", "--out", tmp,
                       "--check", f"/train/prep/ptqs/{self.cfg['checkpoint']}/tensors.sha256"], capture=True, check=False)
             lines = [l for l in out.splitlines() if l.startswith("build_ptqs")]
             self.log("\n".join(lines) or out[-1000:])
             if not any("tensors match" in l for l in lines) or "differ" in "".join(lines):
-                self.die(f"start checkpoint {ck} does not match {ref / 'tensors.sha256'}: remove it and report")
-            sh(["docker", "run", "--rm", "-v", f"{self.models}:/models", "--entrypoint", "bash", IMG_NEMO, "-c",
-                f"chown -R {os.getuid()}:{os.getgid()} /models/{self.cfg['checkpoint']}"], check=False)
+                root_m(f"rm -rf {tmp}")
+                self.die(f"start checkpoint {ck} does not match {ref / 'tensors.sha256'}: report this")
+            root_m(f"mv {tmp} /models/{self.cfg['checkpoint']} && chown -R {os.getuid()}:{os.getgid()} /models/{self.cfg['checkpoint']}")
+            if not (ck / "hf_quant_config.json").exists():
+                self.die(f"start checkpoint {ck}: moving it in place failed")
         elif self.spec.get("release"):
             self.log(f"{ck} exists")
         dst = self.out / "train" / self.ptq
@@ -697,6 +706,9 @@ class Chain:
             env["CL_MOCK_VOCAB"] = str(self.spec["mock_vocab"])
         if self.spec.get("bias_rate0"):
             env["CL_PROVIDER_OVERRIDES"] = json.dumps({"moe_router_bias_update_rate": 0.0})
+        opt = (self.cfg.get("optimizer_overrides") or {}).get("1node")
+        if n > 1 and opt:  # as the 1node training: part of the optimizer state on the CPU (no effect at learning rate 0)
+            env["CL_OPTIMIZER_OVERRIDES"] = json.dumps(opt)
         if n > 1:
             f, l = self.pp_split(n)
             ov = json.loads(env.get("CL_PROVIDER_OVERRIDES", "{}"))
@@ -719,6 +731,7 @@ class Chain:
                   str(self.models / self.cfg["checkpoint"])], capture=True, check=False)
         (self.out / f"{d}.txt").write_text(out)
         print(out)
+        self.root(f"rm -rf /out/train/{d} /out/train/{d}-hf")  # compared: the result is in {d}.txt (rerun to repeat)
         self.log(f"step-0 comparison written to {self.out / (d + '.txt')}")
 
     def clean(self):
@@ -728,7 +741,7 @@ class Chain:
         if missing:
             self.die(f"not cleaned: steps {missing} are not exported yet")
         for i in range(len(self.budgets)):
-            self.root(f"rm -rf /out/train/{self.seg(i)}")
+            self.root(f"rm -rf /out/train/{self.seg(i)} /out/train/{self.seg(i)}.init")
         self.log(f"cleaned: trainer checkpoints of {self.name} removed (exports and controller logs kept)")
 
     def status(self):
@@ -743,9 +756,15 @@ def init_cmd(src, dst):
     checkpoint (CL_PRETRAINED: weights only, step 0, a new optimizer and schedule)."""
     return f"""set -e
 S={src}; D={dst}
-it=$(cat $S/latest_checkpointed_iteration.txt | tr -dc 0-9); IT=$(printf iter_%07d $it)
+if test -s $D/latest_checkpointed_iteration.txt; then  # laid out before (the tracker is written last)
+  IT=$(printf iter_%07d $(cat $D/latest_checkpointed_iteration.txt | tr -dc 0-9))
+  test -d $D/$IT && {{ echo "INIT_CKPT_OK $IT: exists"; exit 0; }}
+fi
+it=$(cat $S/latest_checkpointed_iteration.txt 2>/dev/null | tr -dc 0-9)
+test -n "$it" || {{ echo INIT_CKPT_FAIL no $S/latest_checkpointed_iteration.txt; exit 1; }}
+IT=$(printf iter_%07d $it)
 test -d $S/$IT || {{ echo INIT_CKPT_FAIL no $S/$IT; exit 1; }}
-if test -e $D/$IT; then echo "INIT_CKPT_OK $IT: exists"; exit 0; fi
+rm -rf $D/$IT  # an interrupted earlier attempt
 mkdir -p $D/$IT; cd $S/$IT
 find . -mindepth 1 -type d -printf '%P\\0' | while IFS= read -r -d '' d; do mkdir -p "$D/$IT/$d"; done
 nl=0; nc=0

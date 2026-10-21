@@ -53,7 +53,9 @@ the layout (`--layout`), paths and ports.
   `QADX_API_BASE`, `QADX_API_KEY` [`QADX_API_KEY_2`], `QADX_SIM_MODEL`, `QADX_SIM_RPS`).
 - **Disk** under `out/` while a chain trains (estimates): Nano 9B v2 about 400 GB; the 30B-class models about 1.2 TB
   with `--layout 1node` (all four pipeline stages write their optimizer state on the training node, and a new full
-  checkpoint is written before the previous one is removed). Exports: about 17 GB (30B class) and 7 GB (Nano 9B v2) each.
+  checkpoint is written before the previous one is removed), Qwen3-30B-A3B about 1.4 TB while stage 2 runs and stage 1
+  is not cleaned yet. Exports: about 17 GB (30B class) and 7 GB (Nano 9B v2) each. Under `models/`: about 300 GB for
+  `optional-models`, plus each Nemotron's start checkpoint built by `prepare`.
 - **Host memory, 30B-class models with `--layout 1node`:** half of the optimizer state lives in CPU memory (the
   `optimizer_overrides` of the config; fp32 numerics kept), about 250 GB on the training node (estimate). With
   `--layout 2node` (8 pipeline stages) the optimizer stays on the GPUs (estimate; the smoke run shows it).
@@ -78,7 +80,9 @@ E=experiments/round4
 ```bash
 python3 train/launch/chain.py $E/q30_stage1.toml prepare        # the PTQ student (one GPU)
 python3 train/launch/chain.py $E/q30_stage1.toml check-step0    # GPUs 0-3; read out/check-step0.txt (pass criteria below)
-python3 train/launch/chain.py $E/smoke_q30.toml run --layout 1node && python3 train/launch/chain.py $E/smoke_q30.toml clean
+python3 train/launch/chain.py $E/smoke_q30.toml run --layout 1node        # stage-1 path, 2 steps
+python3 train/launch/chain.py $E/smoke_q30_long.toml run --layout 1node   # stage-2 path (from the smoke's step 2, YaRN), 2 steps
+python3 train/launch/chain.py $E/smoke_q30_long.toml clean && python3 train/launch/chain.py $E/smoke_q30.toml clean
 python3 train/launch/chain.py $E/q30_stage1.toml run --layout 1node   # 180 steps: exports r4-q30-s150, -s160, -s180
 python3 train/launch/chain.py $E/q30_stage2.toml run --layout 1node   # 60 steps from stage 1's step 180: r4-q30-s210, -s240
 ```
@@ -86,7 +90,7 @@ python3 train/launch/chain.py $E/q30_stage2.toml run --layout 1node   # 60 steps
 **Node B: Nemotron Nano 9B v2**
 
 ```bash
-python3 train/launch/chain.py $E/n9.toml prepare                # start checkpoint (CPU, must print "629 / 629 tensors match"), PTQ student
+python3 train/launch/chain.py $E/n9.toml prepare                # start checkpoint (CPU, a few minutes; must log "629 / 629 tensors match"), PTQ student
 python3 train/launch/chain.py $E/n9.toml check-step0            # one GPU
 python3 train/launch/chain.py $E/smoke_n9.toml run --layout 1node && python3 train/launch/chain.py $E/smoke_n9.toml clean
 python3 train/launch/chain.py $E/n9.toml run --layout 1node     # 240 steps: exports r4-n9-s200, -s220, -s240
@@ -95,7 +99,7 @@ python3 train/launch/chain.py $E/n9.toml run --layout 1node     # 240 steps: exp
 **Node C: Nemotron 3 Nano 30B-A3B**
 
 ```bash
-python3 train/launch/chain.py $E/n3.toml prepare                # start checkpoint (CPU, "24147 / 24147 tensors match"), PTQ student
+python3 train/launch/chain.py $E/n3.toml prepare                # start checkpoint (CPU, up to about 1.5 h on few cores; "24147 / 24147 tensors match"), PTQ student
 python3 train/launch/chain.py $E/n3.toml check-step0            # GPUs 0-3
 python3 train/launch/chain.py $E/smoke_n3.toml run --layout 1node && python3 train/launch/chain.py $E/smoke_n3.toml clean
 python3 train/launch/chain.py $E/n3.toml run --layout 1node     # 240 steps: exports r4-n3-s200, -s220, -s240
@@ -107,19 +111,21 @@ Run long commands with `nohup ... &` or in `tmux` and follow `out/<name>.chain.l
 identical, except:
 - k_scale / v_scale on one side only (FP8-cast Q/K/V write scale 1.0 tensors that the start checkpoint does not carry);
 - Nemotron 3 Nano: the router gates counted "equal in value, other dtype" (exported in fp32, stored in bf16);
-- Qwen3-30B-A3B: the routed experts' down_proj input_scale equal to the largest of its layer's experts. The release
-  calibrated them per expert; the student has one input quantizer per expert group, and vLLM serves the max of them as
-  well. So input_scale shows differences for those experts only.
+- Qwen3-30B-A3B: the routed experts' down_proj input_scale. The release calibrated them per expert; vLLM's NVFP4 MoE
+  kernels serve one activation scale per layer and projection, the largest of the experts', so the student's experts
+  all take that largest value at train start. Expected: input_scale differs for routed-expert down_proj only (about
+  6,100 of 18,624), each equal to the largest down_proj input_scale of its layer in the release.
 
 Anything else: stop and report.
 
 **Smoke run, what to check** (2 steps; not a result): `SEGMENT_DONE` and `EXPORTED` in `out/<smoke name>.chain.log`;
-`weight push` lines in `docker logs qadx-train-<segment>` (one per step); for Nemotron 3 Nano `parse service up` in the
-chain log; no `CHAIN_STOP`. An out-of-memory error in the trainer on a 30B-class model: stop and report (the CPU offload
+`weight push` lines in `out/runs/<segment>/trainer.log` (the trainer's whole log, saved when the segment ends); for
+Nemotron 3 Nano `parse service up` in the chain log; no `CHAIN_STOP`. An out-of-memory error in the trainer on a 30B-class model: stop and report (the CPU offload
 fraction is the knob; do not change it yourself).
 
 **Disk.** `clean` a chain once its exports exist. Qwen3-30B-A3B: run `clean` of `q30_stage1.toml` only after stage 2
-has started (stage 2 starts from stage 1's step-180 checkpoint, which `clean` removes).
+has started (stage 2 lays out its start from stage 1's step-180 checkpoint when it launches; a restart of stage 2 still
+finds it after stage 1 is cleaned).
 
 With two nodes for one model: `--layout 2node --peer <rollout host>`, as described in `experiments/pairs-r2/README.md`
 (network, ports, `--peer-ip`). Keep one layout for a whole model. `dryrun` prints every segment's configuration without

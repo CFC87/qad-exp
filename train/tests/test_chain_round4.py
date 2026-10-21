@@ -51,6 +51,27 @@ def main():
     assert (d / "latest_train_state.pt").read_text().strip() == "t"
     o2 = ch.root(chain.init_cmd(f"/out/train/{c1.seg(0)}/checkpoints", f"/out/train/{c2.seg(0)}.init/checkpoints"))
     assert "exists" in o2, o2
+    # stage 1 cleaned after stage 2 laid out its start: a restart of stage 2 still finds it
+    ch.root(f"mv /out/train/{c1.seg(0)} /out/train/{c1.seg(0)}.away")
+    o3 = ch.root(chain.init_cmd(f"/out/train/{c1.seg(0)}/checkpoints", f"/out/train/{c2.seg(0)}.init/checkpoints"))
+    assert "INIT_CKPT_OK iter_0000180: exists" in o3, o3
+    ch.root(f"mv /out/train/{c1.seg(0)}.away /out/train/{c1.seg(0)}")
+    # an interrupted earlier attempt (no tracker yet) is laid out again
+    ch.root(f"rm /out/train/{c2.seg(0)}.init/checkpoints/latest_checkpointed_iteration.txt "
+            f"/out/train/{c2.seg(0)}.init/checkpoints/iter_0000180/__0_0.distcp")
+    o4 = ch.root(chain.init_cmd(f"/out/train/{c1.seg(0)}/checkpoints", f"/out/train/{c2.seg(0)}.init/checkpoints"))
+    assert "INIT_CKPT_OK iter_0000180 from" in o4 and (d / "iter_0000180" / "__0_0.distcp").exists(), o4
+    # clean (exports present) removes both chains' checkpoints and stage 2's start
+    for c in (c1, c2):
+        for _, x in c.export_steps():
+            (out / "exports" / c.export_name(x)).mkdir(parents=True, exist_ok=True)
+            (out / "exports" / c.export_name(x) / "hf_quant_config.json").write_text("{}")
+        c.clean()
+    assert not (out / "train" / c1.seg(0)).exists() and not (out / "train" / f"{c2.seg(0)}.init").exists()
+    # the stage-2 smoke starts from the stage-1 smoke
+    s1, s2 = chain.Chain(R4 / "smoke_q30.toml", ns(out)), chain.Chain(R4 / "smoke_q30_long.toml", ns(out))
+    assert s2.init_from == s1.seg(0) == "smoke-r4-q30-s002" and s2.yarn and s2.cfg["window"] == 131072
+    assert [s2.export_name(x) for _, x in s2.export_steps()] == ["smoke-r4-q30-s004"], s2.export_steps()
     print("init_from ok:", o.strip().splitlines()[-1])
     # 3. per-model settings in the dry-run configs
     want = {"q30_stage1": dict(len="len_qwen3", pad=151643, parse=None, init=None, hf="/models/Qwen3-30B-A3B", pp=4),
@@ -73,7 +94,7 @@ def main():
         assert ("CL_OPTIMIZER_OVERRIDES" in e) == f.startswith(("q30", "n3")), (f, e)
         assert bool(cc["multiturn"]) == (f != "q30_stage2"), f
         print(f"{f}: dry-run settings ok")
-    ch.root("rm -rf /out/train /out/runs /out/dryrun")
+    ch.root("rm -rf /out/train /out/runs /out/dryrun /out/exports")
     shutil.rmtree(out, ignore_errors=True)
     print("round-4 chain test passed")
 
