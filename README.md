@@ -89,6 +89,8 @@ evaluation serves every model on single GPUs (tensor parallel 1).
 
 - [`experiments/pairs-r2`](experiments/pairs-r2/README.md): five QAD runs on mixtures of two training domains, each a
   60 / 120 / 180-step WSD chain, every budget evaluated on the full benchmark set.
+- [`experiments/round4`](experiments/round4/README.md): QAD of Qwen3-30B-A3B, Nemotron Nano 9B v2 and Nemotron 3 Nano on
+  a five-domain mixture, one model per node.
 
 ## Evaluation
 

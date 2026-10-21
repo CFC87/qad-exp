@@ -88,6 +88,30 @@ if _MOE_PAD:  # 20.: pack padding out of the MoE router statistics
 
         cls.forward = forward
 
+    import torch as _torch
+    from megatron.core.transformer.moe import router as _router
+
+    def _apply_expert_bias(self, routing_map, padding_mask=None):
+        # MCore's own (router.py TopKRouter._apply_expert_bias) masks [num_tokens, num_experts] with the flattened
+        # [num_tokens] padding mask, which does not broadcast: the first backward of a model with expert bias would fail
+        if self.enable_expert_bias and _torch.is_grad_enabled():
+            with _torch.no_grad():
+                if padding_mask is not None:
+                    routing_map = routing_map & (~padding_mask.reshape(-1, 1))
+                self.local_tokens_per_expert += routing_map.sum(dim=0)
+
+    _router.TopKRouter._apply_expert_bias = _apply_expert_bias
+    _orig_token_count = _router.get_tokens_per_expert_and_token_count
+
+    def _token_count(routing_map, reduce_group, topk=None, with_padding_mask=False):
+        # an all-padding micro-batch (the empty packs that fill a step) has 0 valid tokens: the load-balancing loss would
+        # be 0 * inf = NaN (and check_for_nan_in_grad stops the run); with at least 1 it is exactly 0
+        g, l, t = _orig_token_count(routing_map, reduce_group, topk=topk, with_padding_mask=with_padding_mask)
+        if with_padding_mask:
+            l, t = _torch.clamp(l, min=1), _torch.clamp(t, min=1)
+        return g, l, t
+
+    _router.get_tokens_per_expert_and_token_count = _token_count  # router.py imports it by name
     from megatron.core.models.gpt.gpt_model import GPTModel as _GPTModel
     _with_padding_mask(_GPTModel)
     try:
@@ -647,14 +671,23 @@ if _IMPORT:
     # differ (Qwen3-30B-A3B's down_proj: NVIDIA calibrated each expert); vLLM serves the max over the experts, so the
     # student takes that max too (equal scales: that value)
     _EXPERT_RELS = ("mlp.experts.linear_fc1", "mlp.experts.linear_fc2")
+    _GROUP_MAX = {}  # Megatron submodule -> the HF modules whose max input scale it takes (Qwen3 MoE experts)
 
     def _layer_map(ckpt):  # (HF layer root, {Megatron submodule: [HF modules sharing its input_scale]}, strict)
         cfg = json.load(open(os.path.join(ckpt, "config.json")))
-        if cfg.get("model_type") == "qwen3_moe":  # Qwen3 MoE: fc1 = gate + up of every expert, fc2 = down; no shared experts
+        if cfg.get("model_type") == "qwen3_moe":
+            # Qwen3 MoE: ModelOpt builds the experts as SequentialMLP (no export rule for fused experts:
+            # modelopt/torch/utils/plugins/mbridge.py), one module per expert: local_experts.<e>.linear_fc1 = gate + up,
+            # linear_fc2 = down; no shared experts. Each expert's input quantizer takes the max over its layer's experts
+            # of that projection (_GROUP_MAX), as vLLM's FlashInfer MoE backends serve one input scale for all experts
             n_exp = int(cfg["num_experts"])
             m = dict(_HF_OF)
-            m["mlp.experts.linear_fc1"] = ["mlp.experts.%d.%s" % (e, p) for e in range(n_exp) for p in ("gate_proj", "up_proj")]
-            m["mlp.experts.linear_fc2"] = ["mlp.experts.%d.down_proj" % e for e in range(n_exp)]
+            for e in range(n_exp):
+                m["mlp.experts.local_experts.%d.linear_fc1" % e] = ["mlp.experts.%d.gate_proj" % e, "mlp.experts.%d.up_proj" % e]
+                m["mlp.experts.local_experts.%d.linear_fc2" % e] = ["mlp.experts.%d.down_proj" % e]
+                _GROUP_MAX["mlp.experts.local_experts.%d.linear_fc1" % e] = ["mlp.experts.%d.%s" % (x, q) for x in range(n_exp)
+                                                                             for q in ("gate_proj", "up_proj")]
+                _GROUP_MAX["mlp.experts.local_experts.%d.linear_fc2" % e] = ["mlp.experts.%d.down_proj" % x for x in range(n_exp)]
             return "model.layers", m, True
         if cfg.get("model_type") == "nemotron_h":
             m = dict(_HF_OF_NEMOTRON_H)
@@ -716,10 +749,11 @@ if _IMPORT:
                             continue  # kept BF16
                         keys = ["%s.%d.%s" % (root, i, h) for h in hf_names]
                         vals = [scales.get(k) for k in keys]
-                        if any(v is None for v in vals) or (len(set(vals)) != 1 and rel not in _EXPERT_RELS):
+                        gvals = [scales.get("%s.%d.%s" % (root, i, h)) for h in _GROUP_MAX[rel]] if rel in _GROUP_MAX else vals
+                        if any(v is None for v in vals + gvals) or (len(set(vals)) != 1 and rel not in _EXPERT_RELS):
                             missing.append((i, rel, vals[:4])); continue
-                        n_maxed += len(set(vals)) != 1
-                        amax = torch.tensor(max(vals) * 6.0 * 448.0, dtype=torch.float32, device=q.amax.device
+                        n_maxed += len(set(gvals)) != 1
+                        amax = torch.tensor(max(gvals) * 6.0 * 448.0, dtype=torch.float32, device=q.amax.device
                                             if getattr(q, "amax", None) is not None else "cuda")
                         q.amax = amax
                         used.update(keys)

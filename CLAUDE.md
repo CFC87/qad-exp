@@ -60,13 +60,13 @@ Notes:
   package has an install-order race that can silently corrupt it.
 - The `sender` step copies the `vllm` package out of the pinned serving image into `.cache/vllm-sender/`. The trainer
   uses it to push weights to the vLLM servers, so sender and receivers are the same build.
-- The `models` step downloads Qwen3-8B and Qwen3-8B-NVFP4 (about 22 GB), the only models the current experiments use.
-  `optional-models` adds the other pinned models (larger Qwen3 and Nemotron models, gpt-oss-120b; about 300 GB),
-  which are not needed now.
+- The `models` step downloads Qwen3-8B and Qwen3-8B-NVFP4 (about 22 GB). `optional-models` adds the other pinned
+  models (Qwen3-30B-A3B and the two Nemotrons with their NVFP4 releases, gpt-oss-120b; about 300 GB): needed by
+  `experiments/round4`; gpt-oss-120b itself is not used by any experiment.
 - `tools/check_env.py --deep` hashes every model weight file against Hugging Face's recorded sha256. It takes a while.
   Run it once after the download.
-- The `data` step downloads the training lists from this repository's release `data-v1`; no login is needed. It
-  checks each sha256 against `data/MANIFEST.toml`.
+- The `data` step downloads the training lists from this repository's releases `data-v1` and `data-v2`; no login is
+  needed. It checks each sha256 against `data/MANIFEST.toml`.
 - The `eval-data` step does three things:
   - downloads the evaluation files;
   - rebuilds the two gated sets (GPQA, LiveCodeBench Pro) from pinned Hugging Face revisions, and unpacks the
