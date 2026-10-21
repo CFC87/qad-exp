@@ -71,7 +71,10 @@ python3 train/launch/chain.py $E/q30_stage1.toml prepare
 python3 train/launch/chain.py $E/n3.toml prepare
 # 2. Step 0 must equal the start checkpoint (n9: one GPU; q30 / n3: GPUs 0-3); read out/check-step0.txt after each.
 #    Pass: every weight, weight_scale, weight_scale_2 and input_scale identical. Expected and fine: k_scale / v_scale
-#    on one side only; Nemotron 3 Nano's router gate counted "equal in value, other dtype". Anything else: stop and report.
+#    on one side only; Nemotron 3 Nano's router gate counted "equal in value, other dtype"; Qwen3-30B-A3B's routed
+#    experts' down_proj input_scale equal to the largest of its layer's experts (the release calibrated them per
+#    expert; the student has one input quantizer per expert group and vLLM serves the max of them as well), so input_scale
+#    shows differences for those experts only. Anything else: stop and report.
 python3 train/launch/chain.py $E/n9.toml check-step0
 python3 train/launch/chain.py $E/q30_stage1.toml check-step0
 python3 train/launch/chain.py $E/n3.toml check-step0

@@ -643,8 +643,19 @@ if _IMPORT:
     # expert: weight_quantizer[e]), shared experts a dense MLP; HF mixer.experts.<e>.up_proj / down_proj (relu2, no gate)
     _MOE_EXPERTS = {"mlp.experts.linear_fc1": "mixer.experts.%d.up_proj", "mlp.experts.linear_fc2": "mixer.experts.%d.down_proj"}
 
+    # routed experts (TEGroupedMLP: one input quantizer for all experts): the checkpoint's per-expert input scales may
+    # differ (Qwen3-30B-A3B's down_proj: NVIDIA calibrated each expert); vLLM serves the max over the experts, so the
+    # student takes that max too (equal scales: that value)
+    _EXPERT_RELS = ("mlp.experts.linear_fc1", "mlp.experts.linear_fc2")
+
     def _layer_map(ckpt):  # (HF layer root, {Megatron submodule: [HF modules sharing its input_scale]}, strict)
         cfg = json.load(open(os.path.join(ckpt, "config.json")))
+        if cfg.get("model_type") == "qwen3_moe":  # Qwen3 MoE: fc1 = gate + up of every expert, fc2 = down; no shared experts
+            n_exp = int(cfg["num_experts"])
+            m = dict(_HF_OF)
+            m["mlp.experts.linear_fc1"] = ["mlp.experts.%d.%s" % (e, p) for e in range(n_exp) for p in ("gate_proj", "up_proj")]
+            m["mlp.experts.linear_fc2"] = ["mlp.experts.%d.down_proj" % e for e in range(n_exp)]
+            return "model.layers", m, True
         if cfg.get("model_type") == "nemotron_h":
             m = dict(_HF_OF_NEMOTRON_H)
             n_exp = int(cfg.get("n_routed_experts") or 0)
@@ -686,7 +697,7 @@ if _IMPORT:
             scales = _read_input_scales(_IMPORT)
             ws2 = _read_input_scales(_IMPORT, ".weight_scale_2") if any(r in hf_of for r in _MOE_EXPERTS) else {}
             n_set, missing, used, mine = 0, [], set(), set()
-            n_w, w_missing = 0, []
+            n_w, w_missing, n_maxed = 0, [], 0
             for chunk in context.model:
                 for layer in chunk.modules():
                     if not isinstance(layer, kinds):
@@ -705,9 +716,10 @@ if _IMPORT:
                             continue  # kept BF16
                         keys = ["%s.%d.%s" % (root, i, h) for h in hf_names]
                         vals = [scales.get(k) for k in keys]
-                        if any(v is None for v in vals) or len(set(vals)) != 1:
-                            missing.append((i, rel, vals)); continue
-                        amax = torch.tensor(vals[0] * 6.0 * 448.0, dtype=torch.float32, device=q.amax.device
+                        if any(v is None for v in vals) or (len(set(vals)) != 1 and rel not in _EXPERT_RELS):
+                            missing.append((i, rel, vals[:4])); continue
+                        n_maxed += len(set(vals)) != 1
+                        amax = torch.tensor(max(vals) * 6.0 * 448.0, dtype=torch.float32, device=q.amax.device
                                             if getattr(q, "amax", None) is not None else "cuda")
                         q.amax = amax
                         used.update(keys)
@@ -730,7 +742,8 @@ if _IMPORT:
                 n_set, _IMPORT, (", NOT FOUND or unequal: %s" % missing[:4]) if missing else "",
                 (", %d input_scales of this stage unused: %s" % (len(unused), unused[:4])) if unused else "",
                 (", %d routed-expert weight scales (weight_scale_2)%s" % (n_w, (", NOT FOUND or unequal: %s" % w_missing[:4])
-                                                                            if w_missing else "")) if ws2 else ""), flush=True)
+                                                                            if w_missing else "")) if ws2 else "")
+                + (", %d routed-expert input quantizers set to the max of unequal expert scales" % n_maxed if n_maxed else ""), flush=True)
             if missing:
                 raise RuntimeError("CL_IMPORT_INPUT_SCALE: %d quantizers without a matching input_scale" % len(missing))
             if w_missing:
