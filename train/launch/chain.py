@@ -531,7 +531,7 @@ class Chain:
             cmd += (f"; F=$(cat non_persistent/latest_checkpointed_iteration.txt 2>/dev/null); "
                     f"if [ -n \"$F\" ] && [ $F -gt {b} ] && [ -d non_persistent/iter_$(printf %07d $F) ]; then "
                     f"rm -rf /out/train/{p}/checkpoints/non_persistent/iter_{b:07d} && echo 'trim parent full {b}'; fi")
-        out = self.root(cmd).strip()
+        out = self.root(cmd + "; true").strip()  # the loop's last test (the newest save is never removed) must not fail the call
         if out:
             self.log(f"{s}: {' '.join(out.split())}")
 
