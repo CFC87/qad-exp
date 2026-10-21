@@ -1,9 +1,17 @@
-# Evaluation of Qwen3-8B checkpoints
+# Evaluation of QAD checkpoints
 
-This harness evaluates Qwen3-8B checkpoints (BF16, NVIDIA's NVFP4 release, NVFP4 QAD exports) so that the numbers are
+This harness evaluates checkpoints of four models (BF16, NVFP4 releases, NVFP4 QAD exports) so that the numbers are
 directly comparable with the reference results: same serving image and flags, same prompts and chat-template rendering,
 same sampling, output caps, context windows and YaRN settings, same number of samples, concurrency and request order,
 same graders. Read `CLAUDE.md` first; its rules apply here (nothing below is a free knob unless it says so).
+
+- **Qwen3-8B**: the sections below, up to [Other models](#other-models-qwen3-30b-a3b-nemotron-nano-9b-v2-nemotron-3-nano-30b-a3b).
+- **Qwen3-30B-A3B, Nemotron Nano 9B v2, Nemotron 3 Nano 30B-A3B** (the round-4 exports of `experiments/round4`): each
+  with its own protocol, the settings of its reference PTQ and BF16 results; see [Other models](#other-models-qwen3-30b-a3b-nemotron-nano-9b-v2-nemotron-3-nano-30b-a3b).
+  Everything else (requirements, outputs, tau2 API errors, graders, data) is shared.
+
+`eval/run.py` recognises the model of every arm from its checkpoint's config (model type and hidden size) and runs that
+model's protocol (`lib/models.py`, `lib/phases.py`); `--model` only confirms it.
 
 ## What runs
 
@@ -158,7 +166,8 @@ eval/results/
   summary.md, summary.json         "Report" (the scores to report), scores by benchmark and category per arm
                                    (lib/summary.py), phases complete
   timing.jsonl                     generation time and output tokens per benchmark
-  <arm>/arm.json                   checkpoint path and sha256 of its config / quant config / tokenizer config, repo commit
+  <arm>/arm.json                   checkpoint path and sha256 of its config / quant config / tokenizer config, repo commit,
+                                   model (absent: Qwen3-8B)
   <arm>/<bench>.jsonl              one row per sample: qid, j, prompt / completion tokens, finish_reason, text
   <arm>/<bench>.grades.jsonl       one row per sample: qid, j, correct (0/1, or a score in [0, 1]), why
   <arm>/<phase>.status.json        complete or not, what is missing, the phase's tasks and spec version
@@ -204,14 +213,97 @@ Grading starts after each phase, one grading job at a time; LiveCodeBench Pro is
 IFBench fetches its NLTK data on first use; `grade_ifbench.py --selftest` re-grades IFBench's own sample outputs
 (288 samples; 6 mismatches against IFBench's stored files are upstream's and appear in the reference too).
 
+## Other models: Qwen3-30B-A3B, Nemotron Nano 9B v2, Nemotron 3 Nano 30B-A3B
+
+Each of these models is evaluated with exactly the settings of its reference PTQ and BF16 results in
+`eval/reference/baselines.json`, so that its recovery is read against them. Their samples per question and output caps
+are not Qwen3-8B's spec v2: they are those references' settings, and they differ between the models on purpose. Only the
+five report categories run (no IFBench, no MMLU-Redux). Each model's protocol is version 1 (`summary.md` prints
+`evaluation spec <model> v1`).
+
+| Phase | Qwen3-30B-A3B | Nemotron Nano 9B v2 | Nemotron 3 Nano 30B-A3B | Concurrency |
+|---|---|---|---|---|
+| S1 | competitions `:8:38912` | competitions `:8:32768` | competitions `:8:131072` | 160 |
+| G | `gpqa_diamond:8:32768` | `gpqa_diamond:8:32768` | `gpqa_diamond:8:131072` | 160 |
+| S3 | `lcb_v6:4:32768` | `lcb_v6:4:32768` | `lcb_v6:4:131072` | 160 |
+| S4 | `lcb_pro:8:32768` | — | `lcb_pro:8:131072` | 160 |
+| L | `longbench_pro:1:32768`, `mrcr8:8:32768` | same | same | 64 |
+| T | `tau2_airline:4:32768`, `tau2_retail:4:32768`, `tau2_telecom:4:32768` (one server, the three domains at once) | same | same | 48 per domain |
+| B | `bfcl_mt:4:32768` | same | same | 128 (4 x 32 threads) |
+| Window | 40,960; L 131,072 with static YaRN x4 | 131,072 (no YaRN) | S1, G, S3, S4 262,144; L, T, B 131,072 (no YaRN) | |
+
+Competitions = `aime26`, `hmmt_feb26`, `hmmt_feb25`, `hmmt_nov25`. Nemotron Nano 9B v2 has no LiveCodeBench Pro phase (it
+does not follow that benchmark's C++ instruction), so its code category is LiveCodeBench v6 alone.
+
+Model-specific settings (`lib/models.py`; everything not listed is as for Qwen3-8B):
+- **Qwen3-30B-A3B**: Qwen3-8B's protocol (same model card sampling, chat template rendering, hermes / qwen3 parsers, BFCL
+  handler `qadx/qwen3-ct`).
+- **Nemotron Nano 9B v2**: sampling T 0.6, top-p 0.95, top-k off (-1), min-p 0, everywhere. Server
+  `--mamba-ssm-cache-dtype float32`; no prefix caching in any phase. Prompts: NVIDIA's evaluation prompts for the
+  competitions, GPQA and LiveCodeBench v6 (NeMo-Skills; rebuilt from the same items, same options and option order); the
+  rendered prompt is counted and sent without the tokenizer's BOS (`"add_special_tokens": false`). tau2 and BFCL: NVIDIA's
+  tool-call parser `nemotron_json` and a text-based reasoning parser, loaded as vLLM plugins from `lib/vllm_plugins/`
+  (mounted read-only into the container); BFCL with the handler `qadx/nemotron-nano-v2-ct`, which uses the server's chat
+  endpoint with these parsers (prompt counted by the server's `/tokenize`).
+- **Nemotron 3 Nano 30B-A3B**: sampling T 1.0, top-p 1.0, top-k off for the completion benchmarks; T 0.6, top-p 0.95, top-k
+  off for tau2 and BFCL (the card's tool-calling setting). Server `--mamba-ssm-cache-dtype float32`, and for NVFP4
+  checkpoints `--moe-backend flashinfer_cutlass` (vLLM 0.29's default NVFP4 MoE backend gives wrong outputs for this
+  model); no prefix caching in any phase. NVIDIA's evaluation prompts as above (their Nemotron 3 variant, with a system
+  message for LiveCodeBench v6), no BOS. tau2 and BFCL: vLLM's `qwen3_coder` tool parser and `nemotron_v3` reasoning
+  parser; BFCL handler `qadx/nemotron3-nano-ct` (chat endpoint, as above).
+
+### Running the round-4 exports
+
+The exports of `experiments/round4` are registered by name: `--arm r4-n9-s200` alone means the checkpoint
+`out/exports/r4-n9-s200` (give `NAME=PATH` for another location). Run one model per command, from the repository root:
+
+```bash
+# dry run first: the plan, every serve command and first request (no GPU, no server)
+.venv-client/bin/python eval/run.py --arm r4-n9-s200 --arm r4-n9-s220 --arm r4-n9-s240 --dry-run
+nohup .venv-client/bin/python eval/run.py --arm r4-n9-s200 --arm r4-n9-s220 --arm r4-n9-s240 > eval-r4-n9.log 2>&1 &
+nohup .venv-client/bin/python eval/run.py --arm r4-n3-s200 --arm r4-n3-s220 --arm r4-n3-s240 > eval-r4-n3.log 2>&1 &
+nohup .venv-client/bin/python eval/run.py --arm r4-q30-s150 --arm r4-q30-s160 --arm r4-q30-s180 \
+    --arm r4-q30-s210 --arm r4-q30-s240 > eval-r4-q30.log 2>&1 &
+```
+
+- Each model needs only its exports (the tokenizer and chat template are read from the export); the reference
+  checkpoints are not run. Their scores are in `eval/reference/baselines.json`.
+- **tau2 API keys:** each arm's tau2 runs as one phase (T, about 2.9 h). With one key the T phases of a model run one
+  after another and are the bottleneck (Qwen3-30B-A3B: 5 x 2.9 h). With `QADX_API_KEY_2` set, the arms alternate
+  between the two keys (`(API lane 1)` / `(API lane 2)` in the dry-run plan), so two T phases run at a time.
+- Typical times on 8 B200 GPUs (server start and generation; reference PTQ runs): Qwen3-30B-A3B about 11 GPU-hours per
+  arm (L 3.5 h, T 2.9 h, B 1.5 h, the rest about 3 h); Nemotron Nano 9B v2 about 8 h per arm; Nemotron 3 Nano about 9 h
+  per arm. A model's arms finish in roughly the larger of (GPU-hours / 8) and the tau2 chain.
+- `--shard`, `--grade-only`, `--limit`, resuming and the outputs work as for Qwen3-8B. `<arm>/arm.json` records the
+  model; an arm name cannot be reused for another model or checkpoint.
+
+### What to report
+
+The **Report** of each model, printed for its arms (one Report per model when arms of several models are given):
+
+```bash
+.venv-client/bin/python eval/lib/summary.py --arms r4-n9-s200,r4-n9-s220,r4-n9-s240 --report
+```
+
+It shows the model's `PTQ (ref)` and `BF16 (ref)` columns from `eval/reference/baselines.json`, the category scores
+(reasoning, code, long, bfcl, tau2), each category's `recovery` = (arm - PTQ) / (BF16 - PTQ), every benchmark score with
+its k, and the `complete + graded` row. Report every row as printed, with the tau2 API-error counts per arm and domain
+(see [tau2 API errors and retries](#tau2-api-errors-and-retries)). Some reference gaps are small (Nemotron Nano 9B v2:
+reasoning 0.8 points; Nemotron 3 Nano: long context 1.1 points, tau2 BF16 below PTQ), so a recovery there is read with
+the scores next to it.
+
 ## Tests (CPU only)
 
 ```bash
 .venv-client/bin/python eval/tests/test_dry_run.py      # scheduler: dry run on 8 GPUs, shards, scheduling loop (after setup: models, eval data)
 ```
 
+The test also dry-runs every other model whose tokenizer it finds (`models/<BF16 or NVFP4 directory>`, after
+`setup/setup.sh optional-models`, or `--tokenizer-dir MODEL=DIR`) and checks that model's phases, windows, server
+flags, sampling, prompts, tau2 and BFCL commands; models without a tokenizer are skipped.
+
 Before release this harness was checked against the reference harness the published numbers come from, on the
-reference's raw outputs:
+reference's raw outputs (for Qwen3-8B, and for the other three models on their reference PTQ / BF16 results):
 - every request body of every benchmark was identical, for three checkpoints and in the same send order, and so were
   every serve, tau2 and BFCL command;
 - every sample re-graded to the same grade, and the category scores matched.

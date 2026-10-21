@@ -1,9 +1,12 @@
 """Run one phase (phases.py) for one arm on one GPU: start vLLM, generate, stop vLLM. Runs in .venv-client.
 
-    run_phase.py --arm NAME --checkpoint DIR --phase S1 --gpu 0 [--results DIR] [--limit N] [--dry-run]
+    run_phase.py --arm NAME --checkpoint DIR --phase S1 --gpu 0 [--model M] [--results DIR] [--limit N] [--dry-run]
 
-Completion benchmarks go through /v1/completions with the chat template rendered client-side by the checkpoint's own
-tokenizer (transformers from the client lock), so the prompt tokens are identical across arms and machines. Every
+--model (default qwen3-8b) selects the model's protocol (models.py, phases.py). Completion benchmarks go through
+/v1/completions with the chat template rendered client-side by the checkpoint's own tokenizer (transformers from the
+client lock), so the prompt tokens are identical across arms and machines. Models with an evaluation prompt style
+(models.py prompt_style: the Nemotrons) get NVIDIA's prompts for competitions, GPQA and LiveCodeBench v6, rebuilt from
+the same items. Every
 (question, sample) request is shuffled with a seed derived from the benchmark name only, so all arms send requests in the
 same order. Results are appended per sample to <results>/<arm>/<bench>.jsonl; a rerun skips the samples already there,
 unless the file was made with another number of samples per question (an earlier evaluation spec, phases.py): then it is
@@ -36,6 +39,8 @@ LOGS = paths.logs_dir()
 TAU2_SEED = 300           # tau2's official seed; tau2 seeds every agent call from it
 TAU2_CLI = paths.LIB / "tau2_run.py"
 BFCL_HANDLER = "qadx/qwen3-ct"
+MODEL = M.DEFAULT_MODEL   # set by main() / dry_run() from --model; SPEC is its models.MODELS entry
+SPEC = M.MODELS[MODEL]
 BFCL_CATEGORIES = ["multi_turn_base", "multi_turn_miss_func", "multi_turn_miss_param", "multi_turn_long_context"]
 BFCL_PER_CATEGORY = 200
 
@@ -61,12 +66,81 @@ def load_items(bench, limit=None):
     return items[:limit] if limit else items
 
 
+def set_model(model):
+    global MODEL, SPEC, BFCL_HANDLER
+    MODEL, SPEC = M.model_id(model), M.spec(model)
+    BFCL_HANDLER = SPEC["bfcl_handler"]
+
+
+MATH_BENCHES = ("aime26", "hmmt_feb26", "hmmt_feb25", "hmmt_nov25")
+QWEN_MATH_SUFFIX = "\n\nPlease reason step by step, and put your final answer within \\boxed{}."
+QWEN_MCQ_SUFFIX = '\n\nPlease show your choice in the `answer` field with only the choice letter, e.g., `"answer": "C"`.'
+LCB_SYS = ("You are an expert Python programmer. You will be given a question (problem specification) and will generate a "
+           "correct Python program that matches the specification and passes all tests.\n\n### Question:\n")
+# NVIDIA NeMo-Skills prompt configs: generic/math, generic/general-boxed, eval/aai/math, eval/aai/mcq-4choices,
+# eval/aai/mcq-10choices-boxed (options A-D here), eval/livecodebench/default_reasoning
+NS_MATH = "Solve the following math problem. Make sure to put the answer (and only answer) inside \\boxed{{}}.\n\n{p}"
+NS_AAI_MATH = ("Solve the following math problem step by step. Put your answer inside \\boxed{{}}.\n\n{p}\n\n"
+               "Remember to put your answer inside \\boxed{{}}.")
+NS_BOXED = "Solve the following problem. Make sure to put the answer (and only answer) inside \\boxed{{}}.\n\n{p}"
+NS_MCQ4 = ("Answer the following multiple choice question. The last line of your response should be in the following "
+           "format: 'Answer: A/B/C/D' (e.g. 'Answer: A').\n\n{p}")
+NS_MCQ_BOXED = ("Answer the following multiple choice question. The last line of your response should be in the following "
+                "format: 'Answer: \\boxed{{A/B/C/D}}' (e.g. 'Answer: \\boxed{{A}}').\n\n{p}")
+NS_LCB_SYS = "You are a helpful and harmless assistant. You should think step-by-step."
+# Nemotron Nano 9B v2 (NeMo-Skills tutorial of the model): math generic/math, GPQA general-boxed, MMLU mcq boxed,
+# LiveCodeBench default_reasoning with the system message replaced by '/think' (renders as no system message).
+# Nemotron 3 Nano (NVIDIA's NeMo Evaluator configuration): math eval/aai/math (its math-oai template is not public; this is
+# the closest), GPQA mcq-4choices, MMLU mcq boxed, LiveCodeBench default_reasoning with its system message.
+PROMPT_STYLES = {
+    "nemo_v2": dict(math=NS_MATH, gpqa=NS_BOXED, mmlu=NS_MCQ_BOXED, lcb_system=None),
+    "nemo_v3": dict(math=NS_AAI_MATH, gpqa=NS_MCQ4, mmlu=NS_MCQ_BOXED, lcb_system=NS_LCB_SYS),
+}
+
+
+def official_msgs(it, bench):
+    """The model's evaluation prompt (models.py prompt_style) for the benchmarks whose wording NVIDIA publishes, rebuilt
+    from the data files (same problems, options and option order); None: use the item as it is."""
+    style = PROMPT_STYLES.get(SPEC.get("prompt_style"))
+    if style is None:
+        return None
+    p = it.get("prompt", "")
+    if bench in MATH_BENCHES:
+        assert p.endswith(QWEN_MATH_SUFFIX), it["qid"]
+        return [{"role": "user", "content": style["math"].format(p=p[:-len(QWEN_MATH_SUFFIX)])}]
+    if bench in ("gpqa_diamond", "mmlu_redux_1k"):
+        assert p.endswith(QWEN_MCQ_SUFFIX), it["qid"]
+        tpl = style["gpqa"] if bench == "gpqa_diamond" else style["mmlu"]
+        return [{"role": "user", "content": tpl.format(p=p[:-len(QWEN_MCQ_SUFFIX)])}]
+    if bench == "lcb_v6":
+        assert p.startswith(LCB_SYS), it["qid"]
+        q, fmt = p[len(LCB_SYS):].split("\n\n### Format: ", 1)
+        if fmt.startswith("You will use the following starter code"):
+            starter = fmt.split("```python\n", 1)[1].rsplit("\n```", 1)[0]
+            body = (q + "\n\nSolve the problem starting with the provided function header.\n\nFunction header:\n```\n"
+                    + starter + "\n```\n\nPlease place the solution code in the following format:\n```python\n"
+                    "# Your solution code here\n```")
+        else:
+            body = (q + "\n\nWrite Python code to solve the problem. Please place the solution code in the following "
+                    "format:\n```python\n# Your solution code here\n```")
+        sys_msg = [{"role": "system", "content": style["lcb_system"]}] if style["lcb_system"] else []
+        return sys_msg + [{"role": "user", "content": body}]
+    return None
+
+
 def render(tok, msgs, thinking=True):
-    """Chat template with the generation prompt, thinking mode on (Qwen3 templates read enable_thinking)."""
+    """Chat template with the generation prompt, thinking mode on (Qwen3 templates read enable_thinking). Models whose
+    template ignores enable_thinking turn thinking off with a marker in the system message (models.py no_think_marker)."""
+    marker = SPEC.get("no_think_marker")
+    if not thinking and marker:
+        if msgs and msgs[0]["role"] == "system":
+            msgs = [dict(msgs[0], content=f"{msgs[0]['content']} {marker}".strip())] + list(msgs[1:])
+        else:
+            msgs = [{"role": "system", "content": marker}] + list(msgs)
     return tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True, enable_thinking=thinking)
 
 
-def prompt_text(tok, it, max_tokens, max_model_len):
+def prompt_text(tok, it, max_tokens, max_model_len, bench=None):
     """The exact prompt string of one item."""
     prompt = it.get("prompt", "")
     if it.get("truncate_middle"):
@@ -78,7 +152,8 @@ def prompt_text(tok, it, max_tokens, max_model_len):
             ids = tok(prompt, add_special_tokens=False)["input_ids"]
             if len(ids) > limit:
                 prompt = tok.decode(ids[:limit // 2] + ids[-(limit // 2):], skip_special_tokens=True)
-    msgs = it.get("messages") or [{"role": "user", "content": prompt}]  # MRCR items are multi-turn conversations
+    # MRCR items are multi-turn conversations
+    msgs = official_msgs(it, bench) or it.get("messages") or [{"role": "user", "content": prompt}]
     text = render(tok, msgs, it.get("enable_thinking", True))
     return text + it.get("prefill", "")
 
@@ -93,9 +168,14 @@ def task_order(bench, items, k, done):
 
 def request_body(tok, it, text, max_tokens, max_model_len):
     """The /v1/completions payload. No per-request seed (the server seed is fixed); the output budget leaves room for
-    the prompt inside the window: min(cap, window - prompt tokens - 64)."""
-    budget = min(it.get("max_tokens", max_tokens), max_model_len - len(tok(text, add_special_tokens=True)["input_ids"]) - 64)
-    return dict(model=M.SERVED_NAME, prompt=text, max_tokens=budget, skip_special_tokens=False, **M.SAMPLING)
+    the prompt inside the window: min(cap, window - prompt tokens - 64). Models with add_special_tokens False (models.py)
+    count the prompt without the tokenizer's special tokens and tell the server not to add them."""
+    add = SPEC["add_special_tokens"]
+    budget = min(it.get("max_tokens", max_tokens), max_model_len - len(tok(text, add_special_tokens=add)["input_ids"]) - 64)
+    body = dict(model=M.SERVED_NAME, prompt=text, max_tokens=budget, skip_special_tokens=False, **SPEC["sampling"])
+    if not add:
+        body["add_special_tokens"] = False
+    return body
 
 
 def done_samples(out_path):
@@ -108,12 +188,12 @@ def done_samples(out_path):
 
 def made_with_k(arm, bench, k):
     """The k the existing <bench>.jsonl of arm was generated with: its .spec stamp, else (no stamp: written under spec
-    v1) phases.V1_K; None when there is no file."""
+    v1 of Qwen3-8B) phases.V1_K; None when there is no file."""
     d = RES / arm
     if not (d / f"{bench}.jsonl").exists():
         return None
     stamp = d / f"{bench}.spec"
-    return int(json.loads(stamp.read_text())["k"]) if stamp.exists() else P.V1_K.get(bench, k)
+    return int(json.loads(stamp.read_text())["k"]) if stamp.exists() else P.v1_k(bench, k, MODEL)
 
 
 def start_bench(arm, bench, k):
@@ -129,7 +209,8 @@ def start_bench(arm, bench, k):
             if f.exists():
                 shutil.move(str(f), str(dst / f.name))
         log(f"{arm}/{bench}: results made with k={old} moved to {dst}; generating k={k} afresh")
-    (d / f"{bench}.spec").write_text(json.dumps(dict(k=k, spec_version=P.SPEC_VERSION)) + "\n")
+    stamp = dict(k=k, spec_version=P.spec_version(MODEL)) | ({} if MODEL == M.DEFAULT_MODEL else dict(model=MODEL))
+    (d / f"{bench}.spec").write_text(json.dumps(stamp) + "\n")
 
 
 async def generate(arm, bench, k, max_tokens, concurrency, tok, gpu, max_model_len, limit=None):
@@ -143,7 +224,7 @@ async def generate(arm, bench, k, max_tokens, concurrency, tok, gpu, max_model_l
     log(f"{arm}/{bench}: {len(items)} questions x k={k}, {len(done)} already done, {len(order)} to run")
     if not order:
         return
-    texts = {qi: prompt_text(tok, items[qi], max_tokens, max_model_len) for qi in sorted({qi for qi, _ in order})}
+    texts = {qi: prompt_text(tok, items[qi], max_tokens, max_model_len, bench) for qi in sorted({qi for qi, _ in order})}
     tasks = [(items[qi], j, texts[qi]) for qi, j in order]
     base = f"http://127.0.0.1:{serve.port(gpu)}"
     sem = asyncio.Semaphore(concurrency)
@@ -197,9 +278,9 @@ async def generate(arm, bench, k, max_tokens, concurrency, tok, gpu, max_model_l
 def first_requests(phase, tok, limit=None, arm=None):
     """For --dry-run: the first request each benchmark of a completion phase would send (respecting samples already
     present for arm)."""
-    cfg = P.PHASES[phase]
+    cfg = P.table(MODEL)[phase]
     out = []
-    for spec in P.specs(phase):
+    for spec in P.specs(phase, MODEL):
         bench, k, mt = spec.split(":")
         items = load_items(bench, limit)
         done = done_samples(RES / arm / f"{bench}.jsonl") if arm and made_with_k(arm, bench, int(k)) == int(k) else set()
@@ -208,14 +289,14 @@ def first_requests(phase, tok, limit=None, arm=None):
             out.append((bench, None, None))
             continue
         qi, j = order[0]
-        text = prompt_text(tok, items[qi], int(mt), cfg["max_model_len"])
+        text = prompt_text(tok, items[qi], int(mt), cfg["max_model_len"], bench)
         out.append((bench, (items[qi]["qid"], j, len(order)), request_body(tok, items[qi], text, int(mt), cfg["max_model_len"])))
     return out
 
 
 def complete_completions(arm, phase, limit=None):
     missing = {}
-    for spec in P.specs(phase):
+    for spec in P.specs(phase, MODEL):
         bench, k, _ = spec.split(":")
         items = load_items(bench, limit)
         done = done_samples(RES / arm / f"{bench}.jsonl")
@@ -290,8 +371,9 @@ def tau2_strip_api_failures(arm, domain, res):
 def tau2_commands(arm, specs, concurrency, gpu, api, limit=None):
     """(domain, results.json, command or None) per domain; None = results complete, convert only."""
     root = RES / arm / "tau2_runs"
+    agent = SPEC["agent_sampling"]  # the model card's tool-calling sampling
     agent_args = {"api_base": f"http://127.0.0.1:{serve.port(gpu)}/v1", "api_key": "EMPTY",
-                  **{x: M.SAMPLING[x] for x in ("temperature", "top_p", "top_k", "min_p")}}
+                  **{x: agent[x] for x in ("temperature", "top_p", "top_k", "min_p") if x in agent}}
     out = []
     for spec in specs:
         bench, k, _ = spec.split(":")
@@ -364,13 +446,18 @@ async def run_tau2(arm, specs, concurrency, gpu, lane, limit=None):
             log(f"tau2 {domain}: no results.json")
 
 
+def lane_of(cfg, lane=None):
+    """The API lane of a tau2 phase: the one given (run.py, for phases whose lane alternates by arm), else the phase's."""
+    return lane or (cfg["api_lane"] if cfg["api_lane"] in (1, 2) else 1)
+
+
 def spec_k(specs, domain):
     return next(s.split(":")[1] for s in specs if s.split(":")[0] == f"tau2_{domain}")
 
 
 def complete_tau2(arm, phase):
     missing = {}
-    for b in P.benches(phase):
+    for b in P.benches(phase, MODEL):
         domain = b.removeprefix("tau2_")
         state = tau2_results_state(RES / arm / "tau2_runs" / "simulations" / domain / "results.json")
         lo = RES / arm / f"{b}.left_out.jsonl"
@@ -381,10 +468,12 @@ def complete_tau2(arm, phase):
 
 
 # ------------------------------------------------------------------------------------------------------------ BFCL
-# BFCL multi-turn (bfcl-eval 2026.3.23 in .venv-bfcl): bfcl_handler.py renders with the checkpoint's chat template and
-# parses like vLLM's qwen3 reasoning + hermes tool parsers, sends the model-card sampling and max_tokens = min(cap,
-# window - prompt). bfcl caches backend state in module globals, so every replicate's generate and evaluate is its own
-# process; generate skips entries already in the replicate's result files, so an interrupted phase resumes.
+# BFCL multi-turn (bfcl-eval 2026.3.23 in .venv-bfcl), handler models.py bfcl_handler: for Qwen3, bfcl_handler.py renders
+# with the checkpoint's chat template and parses like vLLM's qwen3 reasoning + hermes tool parsers; for the Nemotrons it
+# uses the server's chat endpoint with the server-side parsers. It sends the model card's tool-calling sampling and
+# max_tokens = min(cap, window - prompt). bfcl caches backend state in module globals, so every replicate's generate and
+# evaluate is its own process; generate skips entries already in the replicate's result files, so an interrupted phase
+# resumes.
 
 
 def bfcl_env(gpu, max_model_len, max_tokens, root):
@@ -392,8 +481,8 @@ def bfcl_env(gpu, max_model_len, max_tokens, root):
     env.update(BFCL_PROJECT_ROOT=str(root), LOCAL_SERVER_ENDPOINT="127.0.0.1", LOCAL_SERVER_PORT=str(serve.port(gpu)),
                QADX_BFCL_SERVED_MODEL=M.SERVED_NAME, QADX_BFCL_MAX_MODEL_LEN=str(max_model_len),
                QADX_BFCL_MAX_TOKENS=str(max_tokens),
-               QADX_BFCL_SAMPLING=json.dumps({x: M.SAMPLING[x] for x in ("temperature", "top_p", "top_k", "min_p",
-                                                                         "presence_penalty", "repetition_penalty")}))
+               QADX_BFCL_SAMPLING=json.dumps({x: SPEC["agent_sampling"][x] for x in (
+                   "temperature", "top_p", "top_k", "min_p", "presence_penalty", "repetition_penalty") if x in SPEC["agent_sampling"]}))
     return env
 
 
@@ -438,7 +527,7 @@ async def run_bfcl(arm, checkpoint, spec, concurrency, gpu, max_model_len, limit
 
 
 def complete_bfcl(arm, phase, limit=None):
-    k = int(P.specs(phase)[0].split(":")[1])
+    k = int(P.specs(phase, MODEL)[0].split(":")[1])
     g = RES / arm / "bfcl_mt.grades.jsonl"
     n = len({(r["qid"], r["j"]) for r in load_jsonl(g)}) if g.exists() else 0
     want = k * len(BFCL_CATEGORIES) * (limit or BFCL_PER_CATEGORY)
@@ -450,19 +539,22 @@ def complete_bfcl(arm, phase, limit=None):
 
 def write_status(arm, phase, t0, missing, rc=None):
     st = dict(arm=arm, phase=phase, complete=not missing, missing=missing, seconds=round(time.time() - t0),
-              finished=time.strftime("%Y-%m-%dT%H:%M:%S"), exit_code=rc, tasks=P.PHASES[phase]["tasks"],
-              spec_version=P.SPEC_VERSION)
+              finished=time.strftime("%Y-%m-%dT%H:%M:%S"), exit_code=rc, tasks=P.table(MODEL)[phase]["tasks"],
+              spec_version=P.spec_version(MODEL)) | ({} if MODEL == M.DEFAULT_MODEL else dict(model=MODEL))
     (RES / arm / f"{phase}.status.json").write_text(json.dumps(st, indent=1) + "\n")
     return st
 
 
-def dry_run(arm, checkpoint, phase, gpu, limit, compile_cache):
+def dry_run(arm, checkpoint, phase, gpu, limit, compile_cache, model=M.DEFAULT_MODEL, api_lane=None):
     from transformers import AutoTokenizer
 
-    cfg = P.PHASES[phase]
-    kind = P.kind(phase)
-    cmd = serve.serve_cmd(checkpoint, gpu, cfg["max_model_len"], serve.phase_server_args(cfg, kind), compile_cache)
-    print(f"## {arm} {phase} on GPU {gpu}: {cfg['tasks']}  (concurrency {cfg['concurrency']})")
+    set_model(model)
+    cfg = P.table(MODEL)[phase]
+    kind = P.kind(phase, MODEL)
+    cmd = serve.serve_cmd(checkpoint, gpu, cfg["max_model_len"], serve.phase_server_args(cfg, kind, MODEL, checkpoint),
+                          compile_cache)
+    print(f"## {arm} {phase} on GPU {gpu}: {cfg['tasks']}  (concurrency {cfg['concurrency']})"
+          + ("" if MODEL == M.DEFAULT_MODEL else f"  [{SPEC['title']}]"))
     print("serve: " + " ".join(cmd))
     if kind == "completions":
         tok = AutoTokenizer.from_pretrained(checkpoint)
@@ -473,24 +565,25 @@ def dry_run(arm, checkpoint, phase, gpu, limit, compile_cache):
             p = body["prompt"]
             shown = dict(body, prompt=(p if len(p) <= 600 else p[:300] + f" [... {len(p) - 600} chars ...] " + p[-300:]))
             print(f"{bench}: first request = {first[0]} j={first[1]} (of {first[2]} pending); prompt {len(p)} chars, "
-                  f"{len(tok(p, add_special_tokens=True)['input_ids'])} tokens, sha256 {hashlib.sha256(p.encode()).hexdigest()[:16]}")
+                  f"{len(tok(p, add_special_tokens=SPEC['add_special_tokens'])['input_ids'])} tokens, sha256 {hashlib.sha256(p.encode()).hexdigest()[:16]}")
             print("POST /v1/completions " + json.dumps(shown, ensure_ascii=False))
     elif kind == "tau2":
-        api = tau2_api_config(cfg["api_lane"], require=False)
+        api = tau2_api_config(lane_of(cfg, api_lane), require=False)
         print(f"user simulator / judge: {api['model']} at {api['base'] or '<QADX_API_BASE unset>'} with {api['key_name']}"
               f"{' (set)' if api['key'] else ' (unset)'}, throttle {api['rps']} req/s on port {serve.THROTTLE_PORT_BASE + int(gpu)}")
-        for domain, out, c in tau2_commands(arm, P.specs(phase), cfg["concurrency"], gpu, api, limit):
+        for domain, out, c in tau2_commands(arm, P.specs(phase, MODEL), cfg["concurrency"], gpu, api, limit):
             print(f"tau2 {domain}: " + ("complete, convert only" if c is None else " ".join(c)))
     else:
-        k = int(P.specs(phase)[0].split(":")[1])
+        k = int(P.specs(phase, MODEL)[0].split(":")[1])
         gen, ev = bfcl_commands(checkpoint, k, max(1, cfg["concurrency"] // k), limit)
         for c in gen + ev:
             print("bfcl: " + " ".join(c))
         import tempfile
 
         with tempfile.TemporaryDirectory() as td:  # bfcl creates lock files under its project root on import
-            env = bfcl_env(gpu, cfg["max_model_len"], P.specs(phase)[0].split(":")[2], td)
-            r = subprocess.run([str(paths.BFCL_PY), str(paths.LIB / "bfcl_handler.py"), "--first-request", checkpoint],
+            env = bfcl_env(gpu, cfg["max_model_len"], P.specs(phase, MODEL)[0].split(":")[2], td)
+            r = subprocess.run([str(paths.BFCL_PY), str(paths.LIB / "bfcl_handler.py"), "--first-request", checkpoint]
+                               + ([] if BFCL_HANDLER == "qadx/qwen3-ct" else ["--handler", BFCL_HANDLER]),
                                capture_output=True, text=True, env=env, cwd=td)
         first = [l for l in r.stdout.splitlines() if l.startswith("bfcl first request")]
         print(first[0] if r.returncode == 0 and first else f"(could not render the first BFCL request: {r.stderr.strip()[-500:]})")
@@ -502,8 +595,10 @@ async def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--arm", required=True)
     ap.add_argument("--checkpoint", required=True)
-    ap.add_argument("--phase", required=True, choices=P.ORDER)
+    ap.add_argument("--phase", required=True)
     ap.add_argument("--gpu", type=int, required=True)
+    ap.add_argument("--model", default=M.DEFAULT_MODEL, help="the model whose protocol runs (models.py)")
+    ap.add_argument("--api-lane", type=int, choices=(1, 2), default=None, help="tau2 API lane (default: the phase's)")
     ap.add_argument("--results", default=str(paths.RESULTS))
     ap.add_argument("--limit", type=int, default=None, help="first N items per benchmark (pilot runs only)")
     ap.add_argument("--dry-run", action="store_true", help="print the serve command and first requests, start nothing")
@@ -513,29 +608,32 @@ async def main():
     def on_term(*_):  # the scheduler stops a job with SIGTERM: unwind so that the server container is removed
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, on_term)
+    set_model(a.model)
+    if a.phase not in P.table(MODEL):
+        ap.error(f"--phase {a.phase}: phases of {MODEL}: {' '.join(P.order(MODEL))}")
     RES, LOGS = Path(a.results), paths.logs_dir(a.results)
     LOGS.mkdir(parents=True, exist_ok=True)
     cc = not a.no_compile_cache
     if a.dry_run:
-        dry_run(a.arm, a.checkpoint, a.phase, a.gpu, a.limit, cc)
+        dry_run(a.arm, a.checkpoint, a.phase, a.gpu, a.limit, cc, MODEL, a.api_lane)
         return 0
     from transformers import AutoTokenizer
 
-    cfg, kind = P.PHASES[a.phase], P.kind(a.phase)
+    cfg, kind = P.table(MODEL)[a.phase], P.kind(a.phase, MODEL)
     (RES / a.arm).mkdir(parents=True, exist_ok=True)
     t0 = time.time()
     tok = AutoTokenizer.from_pretrained(a.checkpoint)
-    cmd = serve.serve_cmd(a.checkpoint, a.gpu, cfg["max_model_len"], serve.phase_server_args(cfg, kind), cc)
+    cmd = serve.serve_cmd(a.checkpoint, a.gpu, cfg["max_model_len"], serve.phase_server_args(cfg, kind, MODEL, a.checkpoint), cc)
     log(f"starting server: {' '.join(cmd)}")
     proc = serve.start(cmd, a.gpu, LOGS / f"server_{a.arm}_{a.phase}.log", cc)
     try:
         serve.wait_healthy(proc, a.gpu, log=log)
         if kind == "tau2":
-            await run_tau2(a.arm, P.specs(a.phase), cfg["concurrency"], a.gpu, cfg["api_lane"], a.limit)
+            await run_tau2(a.arm, P.specs(a.phase, MODEL), cfg["concurrency"], a.gpu, lane_of(cfg, a.api_lane), a.limit)
         elif kind == "bfcl":
-            await run_bfcl(a.arm, a.checkpoint, P.specs(a.phase)[0], cfg["concurrency"], a.gpu, cfg["max_model_len"], a.limit)
+            await run_bfcl(a.arm, a.checkpoint, P.specs(a.phase, MODEL)[0], cfg["concurrency"], a.gpu, cfg["max_model_len"], a.limit)
         else:
-            for spec in P.specs(a.phase):
+            for spec in P.specs(a.phase, MODEL):
                 bench, k, mt = spec.split(":")
                 await generate(a.arm, bench, int(k), int(mt), cfg["concurrency"], tok, a.gpu, cfg["max_model_len"], a.limit)
     finally:

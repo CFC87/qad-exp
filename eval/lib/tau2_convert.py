@@ -19,8 +19,8 @@ from pathlib import Path
 # tau2's message check raises "AssistantMessage must have either content or tool_calls" for an empty agent reply
 # (tau2/data_model/message.py); the same error for a UserMessage is the user simulator's (API side).
 MODEL_ERR = ("assistantmessage must have either content or tool_calls",)
-# A prompt longer than the served window (40,960) is a limit of the setting, the same for every arm: scored 0 like a
-# model failure but counted separately.
+# A prompt longer than the served window (40,960 for Qwen3, 131,072 for the Nemotrons) is a limit of the setting, the same
+# for every arm: scored 0 like a model failure but counted separately.
 OVERFLOW_ERR = ("maximum context length", "prompt is too long", "contextwindowexceeded")
 API_ERR = ("usermessage must have either content or tool_calls", "ratelimit", "rate limit", "apiconnection",
            "connection", "timeout", "timed out", "internalserver", "service unavailable", "502", "503", "504", "529",

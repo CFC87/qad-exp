@@ -8,13 +8,15 @@ grade row counts as 0. Categories (equal-weight means of their benchmark scores)
     long        LongBench Pro, MRCR 8-needle
     bfcl        BFCL multi-turn
     tau2        tau2 (airline + retail + telecom tasks pooled)
-MMLU-Redux 1k and IFBench are no-damage checks, reported but in no category. Comparisons against the PTQ / BF16
-baselines (recovery = (arm - PTQ) / (BF16 - PTQ)) are made per question from the grades files, not here.
+MMLU-Redux 1k and IFBench are no-damage checks, reported but in no category (Qwen3-8B only). Nemotron Nano 9B v2 has no
+LiveCodeBench Pro evaluation: its code category is LiveCodeBench v6 alone (MODEL_CATS). Comparisons against the PTQ /
+BF16 baselines (recovery = (arm - PTQ) / (BF16 - PTQ)) are made per question from the grades files, not here.
 
-The first section of summary.md, "Report", holds the scores to report: the five category scores and every benchmark
-score to two decimals, one column per arm, with the repository commit, the evaluation spec and whether every phase is
-complete under it and graded. With eval/reference/baselines.json present (the reference PTQ = NVIDIA's NVFP4 release
-and BF16 = Qwen3-8B, evaluated under the same spec), the Report also shows those two columns and each category's recovery
+Each arm's model is the one recorded in <arm>/arm.json (run.py; none recorded: Qwen3-8B). The first section of
+summary.md, "Report", holds the scores to report, one Report per model: the category scores and every benchmark score to
+two decimals, one column per arm, with the repository commit, the model's evaluation spec and whether every phase is
+complete under it and graded. With the model's reference scores in eval/reference/baselines.json (its PTQ and BF16,
+evaluated with the same settings), the Report also shows those two columns and each category's recovery
 = (arm - PTQ) / (BF16 - PTQ).
 
     summary.py --results DIR [--arms a,b] [--report]     (--report: print only the Report for these arms, write nothing)
@@ -29,6 +31,7 @@ from collections import defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import models as M  # noqa: E402
 import paths  # noqa: E402
 import phases as P  # noqa: E402
 
@@ -39,6 +42,16 @@ CATS = {"reasoning": COMPS + ["gpqa_diamond"], "code": ["lcb_v6", "lcb_pro"], "l
 CHECKS = ["mmlu_redux_1k", "ifbench"]
 BENCHES = COMPS + ["gpqa_diamond", "mmlu_redux_1k", "ifbench", "lcb_v6", "lcb_pro", "longbench_pro", "mrcr8"] + TAU2 + ["bfcl_mt"]
 GROUPS = {"tau2": TAU2, "comps": COMPS}
+MODEL_CATS = {m: CATS for m in M.MODELS} | {"nemotron-nano-9b-v2": dict(CATS, code=["lcb_v6"])}
+
+
+def arm_model(results, arm):
+    """The model recorded in <arm>/arm.json (none recorded: Qwen3-8B)."""
+    f = Path(results) / arm / "arm.json"
+    try:
+        return json.load(open(f)).get("model", M.DEFAULT_MODEL)
+    except (OSError, ValueError):
+        return M.DEFAULT_MODEL
 
 
 def load_jsonl(p):
@@ -85,23 +98,24 @@ def diag(s, bench):
                 truncated_pct=100 * st.fmean(x[2] for x in xs), mean_tokens=st.fmean(x[3] for x in xs))
 
 
-def arm_summary(results, arm):
+def arm_summary(results, arm, model=None):
+    model = model or arm_model(results, arm)
     s = samples(results, arm)
     benches = {b: dict(score=score(s, b), graded=all(s.get(m + "@graded", False) for m in GROUPS.get(b, [b]) if m in s),
                        **diag(s, b)) for b in BENCHES + ["comps", "tau2"] if diag(s, b)}
     cats = {}
-    for c, bs in CATS.items():
+    for c, bs in MODEL_CATS[model].items():
         sc = [score(s, b) for b in bs]
         cats[c] = st.fmean(sc) if all(x is not None for x in sc) else None
     status = {}
-    for ph in P.ORDER:
+    for ph in P.order(model):
         f = Path(results) / arm / f"{ph}.status.json"
         if f.exists():
             d = json.load(open(f))  # complete under the current spec only (a status without tasks was written under v1)
-            status[ph] = d.get("complete") is True and d.get("tasks", P.V1_TASKS.get(ph, P.PHASES[ph]["tasks"])) == P.PHASES[ph]["tasks"]
+            status[ph] = d.get("complete") is True and d.get("tasks", P.v1_tasks(ph, model)) == P.table(model)[ph]["tasks"]
         else:
             status[ph] = None
-    return dict(categories=cats, benchmarks=benches, phases=status)
+    return dict(categories=cats, benchmarks=benches, phases=status) | ({} if model == M.DEFAULT_MODEL else dict(model=model))
 
 
 def commit():
@@ -116,43 +130,57 @@ def commit():
 REF = paths.EVAL / "reference" / "baselines.json"
 
 
-def reference():
-    """The reference PTQ / BF16 scores, if they were made under the current spec."""
+def reference(model=M.DEFAULT_MODEL):
+    """The model's reference PTQ / BF16 scores, if they were made under its current spec (Qwen3-8B: the top level of
+    baselines.json; the other models: its "models" section)."""
     if not REF.exists():
         return None
     r = json.load(open(REF))
-    return r if r.get("spec_version") == P.SPEC_VERSION else None
+    if model != M.DEFAULT_MODEL:
+        r = (r.get("models") or {}).get(model)
+    return r if r and r.get("spec_version") == P.spec_version(model) else None
 
 
-def report(out):
+def report(out, model=M.DEFAULT_MODEL):
     """Rows = categories and benchmarks (k = samples per question under the current spec), columns = arms; last row:
     every phase complete under the current spec and every benchmark graded."""
-    k = {sp.split(":")[0]: sp.split(":")[1] for ph in P.ORDER for sp in P.specs(ph)}
+    k = {sp.split(":")[0]: sp.split(":")[1] for ph in P.order(model) for sp in P.specs(ph, model)}
     k["tau2"] = k["tau2_retail"]
+    cats = MODEL_CATS[model]
     f2 = lambda v: "—" if v is None else f"{v:.2f}"  # noqa: E731
     arms = list(out)
-    ref = reference()
+    ref = reference(model)
     rc = [ref["arms"]["ptq"], ref["arms"]["bf16"]] if ref else []
     head = (["PTQ (ref)", "BF16 (ref)"] if ref else []) + arms
-    L = ["## Report", "", f"Commit {commit()} · evaluation spec v{P.SPEC_VERSION} · scores in %, two decimals"
+    spec = f"v{P.spec_version(model)}" if model == M.DEFAULT_MODEL else f"{model} v{P.spec_version(model)}"
+    L = ["## Report" + ("" if model == M.DEFAULT_MODEL else f": {M.MODELS[model]['title']}"), "",
+         f"Commit {commit()} · evaluation spec {spec} · scores in %, two decimals"
          + (" · PTQ / BF16 (ref): eval/reference/baselines.json" if ref else " · no reference baselines for this spec"), "",
          "| | " + " | ".join(head) + " |", "|---|" + "---|" * len(head)]
-    for c in CATS:
+    for c in cats:
         L.append(f"| **{c}** | " + " | ".join([f2(r["categories"][c]) for r in rc] + [f2(out[x]["categories"][c]) for x in arms]) + " |")
     if ref:
-        for c in CATS:
+        for c in cats:
             p_, b_ = rc[0]["categories"][c], rc[1]["categories"][c]
             v = [out[x]["categories"][c] for x in arms]
             L.append(f"| recovery {c} | | | " + " | ".join("—" if y is None else f"{(y - p_) / (b_ - p_):.3f}" for y in v) + " |")
-    for b in COMPS + ["gpqa_diamond", "lcb_v6", "lcb_pro", "longbench_pro", "mrcr8", "bfcl_mt", "tau2"] + CHECKS:
+    for b in [b for b in COMPS + ["gpqa_diamond", "lcb_v6", "lcb_pro", "longbench_pro", "mrcr8", "bfcl_mt", "tau2"] + CHECKS if b in k]:
         L.append(f"| {b} (k={k[b]}) | " + " | ".join([f2(r["benchmarks"].get(b, {}).get("score")) for r in rc]
                                                       + [f2(out[x]["benchmarks"].get(b, {}).get("score")) for x in arms]) + " |")
     ok = []
     for x in arms:
-        bad = [p for p in P.ORDER if out[x]["phases"][p] is not True] + [b for b, d in out[x]["benchmarks"].items() if not d["graded"]]
+        bad = [p for p in P.order(model) if out[x]["phases"][p] is not True] + [b for b, d in out[x]["benchmarks"].items() if not d["graded"]]
         ok.append("yes" if not bad else "NO: " + ", ".join(bad))
     L.append("| complete + graded | " + " | ".join(["ref"] * len(rc) + ok) + " |")
     return L + [""]
+
+
+def by_model(out):
+    """{model: {arm: summary}} in the order the arms were given."""
+    g = {}
+    for x, v in out.items():
+        g.setdefault(v.get("model", M.DEFAULT_MODEL), {})[x] = v
+    return g
 
 
 def main():
@@ -164,26 +192,35 @@ def main():
     root = Path(a.results)
     arms = [x for x in a.arms.split(",") if x] or sorted(p.name for p in root.iterdir() if p.is_dir() and p.name != "logs")
     out = {x: arm_summary(root, x) for x in arms if (root / x).is_dir()}
+    groups = by_model(out)
+    reports = [line for m, o in groups.items() for line in report(o, m)]
     if a.report:
-        print("\n".join(report(out)))
+        print("\n".join(reports))
         return
     f = lambda v: "—" if v is None else f"{v:.1f}"  # noqa: E731
-    L = ["# Scores", ""] + report(out) + ["## Categories", "",
+    L = ["# Scores", ""] + reports + ["## Categories", "",
          "Benchmark score = mean over questions of the per-question mean over samples (%). Categories are "
-         "equal-weight means of their benchmarks (eval/lib/summary.py).", "",
-         "| arm | " + " | ".join(CATS) + " | " + " | ".join(CHECKS) + " |", "|---|" + "---|" * (len(CATS) + len(CHECKS))]
-    for x, v in out.items():
-        L.append(f"| {x} | " + " | ".join(f(v["categories"][c]) for c in CATS) + " | "
-                 + " | ".join(f(v["benchmarks"].get(b, {}).get("score")) for b in CHECKS) + " |")
+         "equal-weight means of their benchmarks (eval/lib/summary.py)."]
+    for m, o in groups.items():
+        cats = MODEL_CATS[m]
+        L += [""] + ([] if list(groups) == [M.DEFAULT_MODEL] else [f"{M.MODELS[m]['title']}:", ""]) + [
+              "| arm | " + " | ".join(cats) + " | " + " | ".join(CHECKS) + " |", "|---|" + "---|" * (len(cats) + len(CHECKS))]
+        for x, v in o.items():
+            L.append(f"| {x} | " + " | ".join(f(v["categories"][c]) for c in cats) + " | "
+                     + " | ".join(f(v["benchmarks"].get(b, {}).get("score")) for b in CHECKS) + " |")
     L += ["", "## By benchmark", "", "| arm | benchmark | score | questions | samples | truncated % | mean output tokens | graded |",
           "|---|---|---|---|---|---|---|---|"]
     for x, v in out.items():
         for b, d in v["benchmarks"].items():
             L.append(f"| {x} | {b} | {f(d['score'])} | {d['questions']} | {d['samples']} | {d['truncated_pct']:.1f} | "
                      f"{d['mean_tokens']:.0f} | {'yes' if d['graded'] else 'NO'} |")
-    L += ["", "## Phases complete", "", "| arm | " + " | ".join(P.ORDER) + " |", "|---|" + "---|" * len(P.ORDER)]
-    for x, v in out.items():
-        L.append(f"| {x} | " + " | ".join({True: "yes", False: "INCOMPLETE", None: "—"}[v["phases"][p]] for p in P.ORDER) + " |")
+    L += ["", "## Phases complete"]
+    for m, o in groups.items():
+        order = P.order(m)
+        L += [""] + ([] if list(groups) == [M.DEFAULT_MODEL] else [f"{M.MODELS[m]['title']}:", ""]) + [
+              "| arm | " + " | ".join(order) + " |", "|---|" + "---|" * len(order)]
+        for x, v in o.items():
+            L.append(f"| {x} | " + " | ".join({True: "yes", False: "INCOMPLETE", None: "—"}[v["phases"][p]] for p in order) + " |")
     (root / "summary.md").write_text("\n".join(L) + "\n")
     json.dump(out, open(root / "summary.json", "w"), indent=1)
     print("\n".join(L))

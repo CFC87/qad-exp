@@ -94,9 +94,10 @@ evaluation serves every model on single GPUs (tensor parallel 1).
 
 ## Evaluation
 
-[`eval/README.md`](eval/README.md): Qwen3-8B checkpoints (BF16, NVIDIA NVFP4, QAD exports) on the full benchmark set with
-`eval/run.py`, one vLLM server per GPU, results comparable with the reference runs; data steps, the τ² API variables,
-outputs, tests.
+[`eval/README.md`](eval/README.md): checkpoints of Qwen3-8B, Qwen3-30B-A3B, Nemotron Nano 9B v2 and Nemotron 3 Nano
+(BF16, NVIDIA NVFP4, QAD exports) on the full benchmark set with `eval/run.py`, each model with the settings of its
+reference results, one vLLM server per GPU, results comparable with the reference runs; data steps, the τ² API
+variables, outputs, tests.
 
 ## Tests without GPUs
 

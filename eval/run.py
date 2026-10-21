@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
-"""Evaluate Qwen3-8B checkpoints on one node: (arm x phase) jobs, one vLLM server per GPU, a GPU takes the next job
-when it is free. Run with the client environment:
+"""Evaluate checkpoints on one node: (arm x phase) jobs, one vLLM server per GPU, a GPU takes the next job when it is
+free. Run with the client environment:
 
     .venv-client/bin/python eval/run.py --arm qad030=/path/to/checkpoint [--arm nvfp4 --arm bf16] [options]
+    .venv-client/bin/python eval/run.py --arm r4-n9-s200 --arm r4-n9-s220 --arm r4-n9-s240 [options]
 
-    --phases S1,S2,...   phases to run (default: all of S1 S2 S3 S4 L1 M T1 T2 B; see eval/lib/phases.py)
+Each arm runs its model's protocol (eval/lib/models.py, phases.py): Qwen3-8B, Qwen3-30B-A3B, Nemotron Nano 9B v2 or
+Nemotron 3 Nano 30B-A3B, recognised from the checkpoint's config.
+
+    --model M            confirm the model of every arm (qwen3-8b, qwen3-30b-a3b, nemotron-nano-9b-v2,
+                         nemotron-3-nano-30b-a3b; aliases q8 q30 n9 n3); an arm whose checkpoint is another model stops
+    --phases S1,S2,...   phases to run (default: all phases of each arm's model; Qwen3-8B: S1 S2 S3 S4 L1 M T1 T2 B)
     --gpus 0,1,...       GPUs to use (default: all GPUs of the node)
     --shard i/n          run only this node's share of the job list (n nodes given the identical arguments)
     --dry-run            print the plan, every job's docker serve command and first request; start nothing
@@ -43,7 +49,8 @@ import serve  # noqa: E402
 JOB_TIMEOUT_S = 12 * 3600
 POLL_S = 10
 PHASE_RUNNER = paths.LIB / "run_phase.py"  # tests substitute a stub
-SLOWDOWN = {"bf16": 1.8, "nvfp4": 1.3}  # built-in baselines write longer outputs than QAD checkpoints (time estimates only)
+# built-in baselines write longer outputs than QAD checkpoints (time estimates only)
+SLOWDOWN = {"bf16": 1.8, "nvfp4": 1.3, "q30-bf16": 1.8, "n9-bf16": 1.8, "n3-bf16": 1.8}
 DATA_FILES = {  # benchmark -> files under eval/data it needs (generation and grading)
     "lcb_v6": ["lcb_v6.jsonl", "lcb_test6.jsonl"], "lcb_pro": ["lcb_pro.jsonl", "lcbpro_excluded.json"],
     "mrcr8": ["mrcr8.jsonl"], "longbench_pro": ["longbench_pro.jsonl"],
@@ -60,10 +67,14 @@ def log(msg):
 
 
 class Job:
-    def __init__(self, arm, ckpt, phase, idx):
-        self.arm, self.ckpt, self.phase, self.idx = arm, ckpt, phase, idx
-        self.hours = P.PHASES[phase]["hours"] * SLOWDOWN.get(arm, 1.0)
-        self.lane = P.PHASES[phase].get("api_lane")
+    def __init__(self, arm, ckpt, phase, idx, model=M.DEFAULT_MODEL, arm_idx=0):
+        self.arm, self.ckpt, self.phase, self.idx, self.model = arm, ckpt, phase, idx, model
+        cfg = P.table(model)[phase]
+        self.hours = cfg["hours"] * SLOWDOWN.get(arm, 1.0)
+        self.lane = cfg.get("api_lane")
+        self.lane_arg = None  # --api-lane for run_phase.py: set when the lane alternates by arm
+        if self.lane == "alt":  # one tau2 phase per arm: lanes 1 and 2 by arm, so two keys run two arms at once
+            self.lane = self.lane_arg = 1 + arm_idx % 2 if os.environ.get("QADX_API_KEY_2") else 1
         if self.lane == 2 and not os.environ.get("QADX_API_KEY_2"):
             self.lane = 1  # one key: both tau2 phases share it
 
@@ -127,15 +138,15 @@ def sha256(p):
 
 
 def check_data(phases):
-    """Missing or altered prompt / test files the selected phases need (empty list = fine)."""
+    """Missing or altered prompt / test files the selected (model, phase) pairs need (empty list = fine)."""
     want = {}
     for line in (paths.DATA / "SHA256SUMS").read_text().splitlines():
         if line.strip() and not line.startswith("#"):
             h, f = line.split()
             want[f] = h
     need = set()
-    for ph in phases:
-        for b in P.benches(ph):
+    for model, ph in phases:
+        for b in P.benches(ph, model):
             if b.startswith("tau2_") or b == "bfcl_mt":
                 continue
             need.update(DATA_FILES.get(b, [f"{b}.jsonl"]))
@@ -151,9 +162,9 @@ def check_data(phases):
 
 def preflight(jobs, gpus, dry):
     problems = []
-    for arm, ckpt in sorted({(j.arm, j.ckpt) for j in jobs}):
-        problems += M.check_checkpoint(ckpt)
-    problems += check_data(sorted({j.phase for j in jobs}))
+    for arm, ckpt, model in sorted({(j.arm, j.ckpt, j.model) for j in jobs}):
+        problems += M.check_checkpoint(ckpt, model)
+    problems += check_data(sorted({(j.model, j.phase) for j in jobs}))
     if any(j.lane for j in jobs) and not (os.environ.get("QADX_API_BASE") and os.environ.get("QADX_API_KEY")):
         problems.append("tau2 phases need QADX_API_BASE and QADX_API_KEY (eval/README.md)")
     if not dry:
@@ -166,8 +177,9 @@ def preflight(jobs, gpus, dry):
     return problems
 
 
-def bind_arm(results, arm, ckpt):
-    """<results>/<arm>/arm.json records the checkpoint; refuse to mix two checkpoints under one arm name."""
+def bind_arm(results, arm, ckpt, model=M.DEFAULT_MODEL):
+    """<results>/<arm>/arm.json records the checkpoint and its model; refuse to mix two checkpoints (or models) under one
+    arm name (an arm.json without a model field was written for Qwen3-8B)."""
     d = Path(results) / arm
     d.mkdir(parents=True, exist_ok=True)
     f = d / "arm.json"
@@ -175,8 +187,10 @@ def bind_arm(results, arm, ckpt):
         old = json.load(open(f))
         if old["checkpoint"] != ckpt:
             raise SystemExit(f"arm {arm} already holds results of {old['checkpoint']}; use another arm name for {ckpt}")
+        if old.get("model", M.DEFAULT_MODEL) != model:
+            raise SystemExit(f"arm {arm} already holds {old.get('model', M.DEFAULT_MODEL)} results; {ckpt} runs {model}")
         return
-    info = dict(arm=arm, checkpoint=ckpt)
+    info = dict(arm=arm, checkpoint=ckpt) | ({} if model == M.DEFAULT_MODEL else dict(model=model))
     for name in ("config.json", "hf_quant_config.json", "generation_config.json", "tokenizer_config.json"):
         p = Path(ckpt) / name
         if p.exists():
@@ -187,13 +201,14 @@ def bind_arm(results, arm, ckpt):
 
 
 def phase_complete(results, job):
-    """Complete under the current spec: a status file without a tasks field was written under spec v1 (phases.V1_TASKS)."""
+    """Complete under the current spec: a status file without a tasks field was written under spec v1 of Qwen3-8B
+    (phases.V1_TASKS)."""
     f = Path(results) / job.arm / f"{job.phase}.status.json"
     if not f.exists():
         return False
     st = json.load(open(f))
-    tasks = st.get("tasks", P.V1_TASKS.get(job.phase, P.PHASES[job.phase]["tasks"]))
-    return st.get("complete") is True and tasks == P.PHASES[job.phase]["tasks"]
+    tasks = st.get("tasks", P.v1_tasks(job.phase, job.model))
+    return st.get("complete") is True and tasks == P.table(job.model)[job.phase]["tasks"]
 
 
 class Grader(threading.Thread):
@@ -209,8 +224,7 @@ class Grader(threading.Thread):
             if item is None:
                 self.q.task_done()
                 return
-            arm, phase = item
-            benches = P.benches(phase)
+            arm, benches = item
             if "lcb_pro" in benches:
                 self.lcbpro.add(arm)
             self._grade(arm, benches, lcbpro=False)
@@ -244,7 +258,7 @@ def run_jobs(jobs, gpus, args, results):
     for j in [j for j in pending if phase_complete(results, j) and not args.force]:
         log(f"{j.name}: complete, not rerun (--force reruns it)")
         pending.remove(j)
-        grader.q.put((j.arm, j.phase))
+        grader.q.put((j.arm, P.benches(j.phase, j.model)))
     running, failed, blocked = {}, [], {}
     stop = {"flag": False}
 
@@ -279,6 +293,8 @@ def run_jobs(jobs, gpus, args, results):
             pending.remove(job)
             cmd = [sys.executable, str(PHASE_RUNNER), "--arm", job.arm, "--checkpoint", job.ckpt,
                    "--phase", job.phase, "--gpu", str(g), "--results", str(results)]
+            cmd += (["--model", job.model] if job.model != M.DEFAULT_MODEL else []) + \
+                (["--api-lane", str(job.lane_arg)] if job.lane_arg else [])
             cmd += (["--limit", str(args.limit)] if args.limit else []) + (["--no-compile-cache"] if args.no_compile_cache else [])
             lf = open(paths.logs_dir(results) / f"{job.arm}_{job.phase}.log", "a")
             proc = subprocess.Popen(cmd, stdout=lf, stderr=subprocess.STDOUT, start_new_session=True)
@@ -303,7 +319,7 @@ def run_jobs(jobs, gpus, args, results):
                 failed.append(job)
                 log(f"END {job.name} on GPU {g}: {'INCOMPLETE' if rc == 3 else f'FAILED (exit {rc})'} after {el:.2f} h; "
                     f"see logs/{job.arm}_{job.phase}.log; rerun the same command to resume")
-            grader.q.put((job.arm, job.phase))
+            grader.q.put((job.arm, P.benches(job.phase, job.model)))
     if stop["flag"]:
         log(f"interrupted: stopping {len(running)} running job(s); rerun the same command to resume")
         for g, (job, proc, t0, lf) in running.items():
@@ -317,8 +333,10 @@ def run_jobs(jobs, gpus, args, results):
 def main():
     global LOG
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--arm", action="append", required=True, help="NAME (built-in: bf16, nvfp4) or NAME=/checkpoint/dir")
-    ap.add_argument("--phases", default=",".join(P.ORDER))
+    ap.add_argument("--arm", action="append", required=True,
+                    help="NAME (registered: bf16, nvfp4, the round-4 exports r4-*) or NAME=/checkpoint/dir")
+    ap.add_argument("--model", default=None, help="confirm every arm's model (eval/lib/models.py)")
+    ap.add_argument("--phases", default="", help="phases to run (default: all phases of each arm's model)")
     ap.add_argument("--gpus", default="")
     ap.add_argument("--shard", default="0/1")
     ap.add_argument("--results", default=str(paths.RESULTS))
@@ -329,19 +347,24 @@ def main():
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--no-compile-cache", action="store_true")
     args = ap.parse_args()
-    arms = [M.resolve_arm(s) for s in args.arm]
-    if len({a for a, _ in arms}) != len(arms):
+    arms = [M.resolve_arm(s, args.model) for s in args.arm]
+    if len({a for a, _, _ in arms}) != len(arms):
         raise SystemExit("arm names must be unique")
     if args.limit:
-        arms = [(f"{a}__limit{args.limit}", c) for a, c in arms]
-    phases = [p for p in args.phases.split(",") if p]
-    for p in phases:
-        if p not in P.PHASES:
-            raise SystemExit(f"unknown phase {p}; phases: {' '.join(P.ORDER)}")
+        arms = [(f"{a}__limit{args.limit}", c, m) for a, c, m in arms]
+    sel = [p for p in args.phases.split(",") if p]
+    for a, _, m in arms:
+        bad = [p for p in sel if p not in P.table(m)]
+        if bad:
+            raise SystemExit(f"arm {a} ({m}): unknown phase {' '.join(bad)}; its phases: {' '.join(P.order(m))}")
+    phases = {a: sel or P.order(m) for a, _, m in arms}
     gpus = gpu_list(args.gpus)
     si, sn = (int(x) for x in args.shard.split("/"))
     results = Path(args.results).resolve()
-    jobs = [Job(a, c, p, i) for i, (a, c, p) in enumerate((a, c, p) for a, c in arms for p in phases)]
+    tau_idx, seen = {}, {}  # the arm's position among the arms of its model: alternating tau2 lanes
+    for a, _, m in arms:
+        tau_idx[a] = seen[m] = seen.get(m, -1) + 1
+    jobs = [Job(a, c, p, i, m, tau_idx[a]) for i, (a, c, m, p) in enumerate((a, c, m, p) for a, c, m in arms for p in phases[a])]
     parts, loads = lpt_shards(jobs, sn)
     jobs = sorted(parts[si], key=lambda j: (-j.hours, j.idx))
 
@@ -354,7 +377,8 @@ def main():
         plan, span = simulate(jobs, gpus, args.tau2_per_key)
         print(f"# plan (estimated hours on B200; makespan ~{span:.1f} h + grading)")
         for j, g, t in plan:
-            print(f"  t+{t:5.1f} h  GPU {g}  {j.name:<28} ~{j.hours:.1f} h" + (f"  (API lane {j.lane})" if j.lane else ""))
+            print(f"  t+{t:5.1f} h  GPU {g}  {j.name:<28} ~{j.hours:.1f} h" + (f"  (API lane {j.lane})" if j.lane else "")
+                  + ("" if j.model == M.DEFAULT_MODEL else f"  [{j.model}]"))
         print()
         sys.path.insert(0, str(paths.LIB))
         import run_phase as RP
@@ -362,7 +386,7 @@ def main():
         RP.RES, RP.LOGS = results, paths.logs_dir(results)
         for j, g, _ in plan:
             try:
-                RP.dry_run(j.arm, j.ckpt, j.phase, g, args.limit, not args.no_compile_cache)
+                RP.dry_run(j.arm, j.ckpt, j.phase, g, args.limit, not args.no_compile_cache, j.model, j.lane_arg)
             except Exception as e:  # noqa: BLE001  (e.g. a data file not fetched yet: listed by the preflight above)
                 print(f"## {j.name} on GPU {g}: cannot show its requests: {type(e).__name__}: {e}\n")
         return
@@ -370,12 +394,12 @@ def main():
     results.mkdir(parents=True, exist_ok=True)
     paths.logs_dir(results).mkdir(parents=True, exist_ok=True)
     LOG = paths.logs_dir(results) / "scheduler.log"
-    for a, c in arms:
-        bind_arm(results, a, c)
+    for a, c, m in arms:
+        bind_arm(results, a, c, m)
     if args.grade_only:
         g = Grader(results)
-        for a, _ in arms:
-            g._grade(a, [b for p in phases for b in P.benches(p)], lcbpro=True)
+        for a, _, m in arms:
+            g._grade(a, [b for p in phases[a] for b in P.benches(p, m)], lcbpro=True)
     else:
         problems = preflight(jobs, gpus, dry=False)
         if problems:
@@ -387,7 +411,7 @@ def main():
         if failed:
             log("not complete: " + ", ".join(j.name for j in failed) + " (rerun the same command to resume)")
     subprocess.run([sys.executable, str(paths.LIB / "summary.py"), "--results", str(results),
-                    "--arms", ",".join(a for a, _ in arms)], stdout=subprocess.DEVNULL)
+                    "--arms", ",".join(a for a, _, _ in arms)], stdout=subprocess.DEVNULL)
     log(f"summary: {results / 'summary.md'}")
 
 

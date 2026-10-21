@@ -194,5 +194,531 @@
     }
    }
   }
+ },
+ "models": {
+  "qwen3-30b-a3b": {
+   "spec_version": 1,
+   "note": "Reference baselines of Qwen3-30B-A3B, evaluated with this harness's Qwen3-30B-A3B protocol (eval/lib/phases.py MODEL_PHASES, spec v1): PTQ = nvidia/Qwen3-30B-A3B-NVFP4 (the round-4 start checkpoint), BF16 = Qwen/Qwen3-30B-A3B, the revisions pinned in env/versions.toml. Scores in % (eval/lib/summary.py definitions). Recovery of a category = (arm - PTQ) / (BF16 - PTQ).",
+   "arms": {
+    "ptq": {
+     "categories": {
+      "reasoning": 54.54797979797981,
+      "code": 40.69317160826595,
+      "long": 25.463228170602513,
+      "bfcl": 29.9375,
+      "tau2": 29.856115107913666
+     },
+     "benchmarks": {
+      "aime26": {
+       "score": 71.66666666666667,
+       "questions": 30,
+       "samples": 240
+      },
+      "hmmt_feb25": {
+       "score": 42.916666666666664,
+       "questions": 30,
+       "samples": 240
+      },
+      "hmmt_feb26": {
+       "score": 40.53030303030303,
+       "questions": 33,
+       "samples": 264
+      },
+      "hmmt_nov25": {
+       "score": 55.00000000000001,
+       "questions": 30,
+       "samples": 240
+      },
+      "gpqa_diamond": {
+       "score": 62.62626262626263,
+       "questions": 198,
+       "samples": 1584
+      },
+      "lcb_v6": {
+       "score": 55.285714285714285,
+       "questions": 175,
+       "samples": 700
+      },
+      "lcb_pro": {
+       "score": 26.10062893081761,
+       "questions": 159,
+       "samples": 1272
+      },
+      "longbench_pro": {
+       "score": 38.35360245786748,
+       "questions": 1380,
+       "samples": 1380
+      },
+      "mrcr8": {
+       "score": 12.572853883337547,
+       "questions": 100,
+       "samples": 800
+      },
+      "tau2_airline": {
+       "score": 34.0,
+       "questions": 50,
+       "samples": 200
+      },
+      "tau2_retail": {
+       "score": 36.40350877192983,
+       "questions": 114,
+       "samples": 456
+      },
+      "tau2_telecom": {
+       "score": 21.49122807017544,
+       "questions": 114,
+       "samples": 456
+      },
+      "bfcl_mt": {
+       "score": 29.9375,
+       "questions": 800,
+       "samples": 3200
+      },
+      "comps": {
+       "score": 52.235772357723576,
+       "questions": 123,
+       "samples": 984
+      },
+      "tau2": {
+       "score": 29.856115107913666,
+       "questions": 278,
+       "samples": 1112
+      }
+     }
+    },
+    "bf16": {
+     "categories": {
+      "reasoning": 58.63888888888889,
+      "code": 45.08715184186882,
+      "long": 31.311899331649272,
+      "bfcl": 33.03125,
+      "tau2": 38.039568345323744
+     },
+     "benchmarks": {
+      "aime26": {
+       "score": 70.0,
+       "questions": 30,
+       "samples": 240
+      },
+      "hmmt_feb25": {
+       "score": 50.416666666666664,
+       "questions": 30,
+       "samples": 240
+      },
+      "hmmt_feb26": {
+       "score": 48.10606060606061,
+       "questions": 33,
+       "samples": 264
+      },
+      "hmmt_nov25": {
+       "score": 59.583333333333336,
+       "questions": 30,
+       "samples": 240
+      },
+      "gpqa_diamond": {
+       "score": 65.08838383838383,
+       "questions": 198,
+       "samples": 1584
+      },
+      "lcb_v6": {
+       "score": 60.14285714285714,
+       "questions": 175,
+       "samples": 700
+      },
+      "lcb_pro": {
+       "score": 30.031446540880502,
+       "questions": 159,
+       "samples": 1272
+      },
+      "longbench_pro": {
+       "score": 44.50610315192775,
+       "questions": 1380,
+       "samples": 1380
+      },
+      "mrcr8": {
+       "score": 18.11769551137079,
+       "questions": 100,
+       "samples": 800
+      },
+      "tau2_airline": {
+       "score": 41.0,
+       "questions": 50,
+       "samples": 200
+      },
+      "tau2_retail": {
+       "score": 46.49122807017544,
+       "questions": 114,
+       "samples": 456
+      },
+      "tau2_telecom": {
+       "score": 28.289473684210524,
+       "questions": 114,
+       "samples": 456
+      },
+      "bfcl_mt": {
+       "score": 33.03125,
+       "questions": 800,
+       "samples": 3200
+      },
+      "comps": {
+       "score": 56.8089430894309,
+       "questions": 123,
+       "samples": 984
+      },
+      "tau2": {
+       "score": 38.039568345323744,
+       "questions": 278,
+       "samples": 1112
+      }
+     }
+    }
+   }
+  },
+  "nemotron-nano-9b-v2": {
+   "spec_version": 1,
+   "note": "Reference baselines of Nemotron Nano 9B v2, evaluated with this harness's Nemotron Nano 9B v2 protocol (spec v1): PTQ = the round-4 start checkpoint (NVIDIA-Nemotron-Nano-9B-v2-PTQ-NVFP4-nvscale, built by train/prep/build_ptqs.py from the BF16 model at the NVIDIA NVFP4 release's layer map and static scales), BF16 = nvidia/NVIDIA-Nemotron-Nano-9B-v2 at its pinned revision. The BF16 reference comes from two runs with these settings: reasoning, code and long context from one, BFCL and tau2 from the other. Code = LiveCodeBench v6 only. Scores in %; recovery of a category = (arm - PTQ) / (BF16 - PTQ).",
+   "arms": {
+    "ptq": {
+     "categories": {
+      "reasoning": 59.03282828282828,
+      "code": 59.14285714285714,
+      "long": 21.13869080087778,
+      "bfcl": 44.25,
+      "tau2": 32.2841726618705
+     },
+     "benchmarks": {
+      "aime26": {
+       "score": 72.91666666666666,
+       "questions": 30,
+       "samples": 240
+      },
+      "hmmt_feb25": {
+       "score": 53.75,
+       "questions": 30,
+       "samples": 240
+      },
+      "hmmt_feb26": {
+       "score": 48.86363636363637,
+       "questions": 33,
+       "samples": 264
+      },
+      "hmmt_nov25": {
+       "score": 58.333333333333336,
+       "questions": 30,
+       "samples": 240
+      },
+      "gpqa_diamond": {
+       "score": 61.30050505050505,
+       "questions": 198,
+       "samples": 1584
+      },
+      "lcb_v6": {
+       "score": 59.14285714285714,
+       "questions": 175,
+       "samples": 700
+      },
+      "longbench_pro": {
+       "score": 31.80303040541305,
+       "questions": 1380,
+       "samples": 1380
+      },
+      "mrcr8": {
+       "score": 10.474351196342509,
+       "questions": 100,
+       "samples": 800
+      },
+      "tau2_airline": {
+       "score": 28.000000000000004,
+       "questions": 50,
+       "samples": 200
+      },
+      "tau2_retail": {
+       "score": 45.39473684210527,
+       "questions": 114,
+       "samples": 456
+      },
+      "tau2_telecom": {
+       "score": 21.052631578947366,
+       "questions": 114,
+       "samples": 456
+      },
+      "bfcl_mt": {
+       "score": 44.25,
+       "questions": 800,
+       "samples": 3200
+      },
+      "comps": {
+       "score": 58.231707317073166,
+       "questions": 123,
+       "samples": 984
+      },
+      "tau2": {
+       "score": 32.2841726618705,
+       "questions": 278,
+       "samples": 1112
+      }
+     }
+    },
+    "bf16": {
+     "categories": {
+      "reasoning": 59.82323232323232,
+      "code": 61.142857142857146,
+      "long": 22.177033034220774,
+      "bfcl": 45.53125,
+      "tau2": 36.24100719424461
+     },
+     "benchmarks": {
+      "aime26": {
+       "score": 77.08333333333334,
+       "questions": 30,
+       "samples": 240
+      },
+      "hmmt_feb25": {
+       "score": 54.58333333333333,
+       "questions": 30,
+       "samples": 240
+      },
+      "hmmt_feb26": {
+       "score": 47.72727272727273,
+       "questions": 33,
+       "samples": 264
+      },
+      "hmmt_nov25": {
+       "score": 57.91666666666667,
+       "questions": 30,
+       "samples": 240
+      },
+      "gpqa_diamond": {
+       "score": 61.80555555555556,
+       "questions": 198,
+       "samples": 1584
+      },
+      "lcb_v6": {
+       "score": 61.142857142857146,
+       "questions": 175,
+       "samples": 700
+      },
+      "longbench_pro": {
+       "score": 33.416169359199195,
+       "questions": 1380,
+       "samples": 1380
+      },
+      "mrcr8": {
+       "score": 10.937896709242354,
+       "questions": 100,
+       "samples": 800
+      },
+      "tau2_airline": {
+       "score": 36.5,
+       "questions": 50,
+       "samples": 200
+      },
+      "tau2_retail": {
+       "score": 48.46491228070175,
+       "questions": 114,
+       "samples": 456
+      },
+      "tau2_telecom": {
+       "score": 23.903508771929825,
+       "questions": 114,
+       "samples": 456
+      },
+      "bfcl_mt": {
+       "score": 45.53125,
+       "questions": 800,
+       "samples": 3200
+      },
+      "comps": {
+       "score": 59.04471544715447,
+       "questions": 123,
+       "samples": 984
+      },
+      "tau2": {
+       "score": 36.24100719424461,
+       "questions": 278,
+       "samples": 1112
+      }
+     }
+    }
+   }
+  },
+  "nemotron-3-nano-30b-a3b": {
+   "spec_version": 1,
+   "note": "Reference baselines of Nemotron 3 Nano 30B-A3B, evaluated with this harness's Nemotron 3 Nano protocol (spec v1): PTQ = the round-4 start checkpoint (NVIDIA-Nemotron-3-Nano-30B-A3B-PTQ-NVFP4-nvscale, built by train/prep/build_ptqs.py from the BF16 model at the NVIDIA NVFP4 release's layer map and static scales), BF16 = nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16 at its pinned revision. The BF16 reference comes from two runs with these settings: reasoning and code from one, long context, BFCL and tau2 from the other. Its tau2 score is below the PTQ's, so the tau2 recovery of this model has a negative denominator. Scores in %; recovery of a category = (arm - PTQ) / (BF16 - PTQ).",
+   "arms": {
+    "ptq": {
+     "categories": {
+      "reasoning": 77.62121212121212,
+      "code": 47.929919137466314,
+      "long": 23.726944865104905,
+      "bfcl": 52.31249999999999,
+      "tau2": 53.507194244604314
+     },
+     "benchmarks": {
+      "aime26": {
+       "score": 85.41666666666666,
+       "questions": 30,
+       "samples": 240
+      },
+      "hmmt_feb25": {
+       "score": 79.16666666666666,
+       "questions": 30,
+       "samples": 240
+      },
+      "hmmt_feb26": {
+       "score": 70.45454545454545,
+       "questions": 33,
+       "samples": 264
+      },
+      "hmmt_nov25": {
+       "score": 81.66666666666667,
+       "questions": 30,
+       "samples": 240
+      },
+      "gpqa_diamond": {
+       "score": 71.40151515151516,
+       "questions": 198,
+       "samples": 1584
+      },
+      "lcb_v6": {
+       "score": 66.14285714285715,
+       "questions": 175,
+       "samples": 700
+      },
+      "lcb_pro": {
+       "score": 29.71698113207547,
+       "questions": 159,
+       "samples": 1272
+      },
+      "longbench_pro": {
+       "score": 41.636997884028126,
+       "questions": 1380,
+       "samples": 1380
+      },
+      "mrcr8": {
+       "score": 5.816891846181681,
+       "questions": 100,
+       "samples": 800
+      },
+      "tau2_airline": {
+       "score": 48.5,
+       "questions": 50,
+       "samples": 200
+      },
+      "tau2_retail": {
+       "score": 65.78947368421053,
+       "questions": 114,
+       "samples": 456
+      },
+      "tau2_telecom": {
+       "score": 43.42105263157895,
+       "questions": 114,
+       "samples": 456
+      },
+      "bfcl_mt": {
+       "score": 52.31249999999999,
+       "questions": 800,
+       "samples": 3200
+      },
+      "comps": {
+       "score": 78.96341463414635,
+       "questions": 123,
+       "samples": 984
+      },
+      "tau2": {
+       "score": 53.507194244604314,
+       "questions": 278,
+       "samples": 1112
+      }
+     }
+    },
+    "bf16": {
+     "categories": {
+      "reasoning": 81.66919191919192,
+      "code": 50.95619946091645,
+      "long": 24.832037556069068,
+      "bfcl": 54.8125,
+      "tau2": 53.23741007194245
+     },
+     "benchmarks": {
+      "aime26": {
+       "score": 90.41666666666667,
+       "questions": 30,
+       "samples": 240
+      },
+      "hmmt_feb25": {
+       "score": 84.16666666666667,
+       "questions": 30,
+       "samples": 240
+      },
+      "hmmt_feb26": {
+       "score": 75.37878787878788,
+       "questions": 33,
+       "samples": 264
+      },
+      "hmmt_nov25": {
+       "score": 84.58333333333333,
+       "questions": 30,
+       "samples": 240
+      },
+      "gpqa_diamond": {
+       "score": 73.80050505050505,
+       "questions": 198,
+       "samples": 1584
+      },
+      "lcb_v6": {
+       "score": 67.71428571428572,
+       "questions": 175,
+       "samples": 700
+      },
+      "lcb_pro": {
+       "score": 34.19811320754717,
+       "questions": 159,
+       "samples": 1272
+      },
+      "longbench_pro": {
+       "score": 44.70636780236178,
+       "questions": 1380,
+       "samples": 1380
+      },
+      "mrcr8": {
+       "score": 4.95770730977635,
+       "questions": 100,
+       "samples": 800
+      },
+      "tau2_airline": {
+       "score": 50.0,
+       "questions": 50,
+       "samples": 200
+      },
+      "tau2_retail": {
+       "score": 67.98245614035088,
+       "questions": 114,
+       "samples": 456
+      },
+      "tau2_telecom": {
+       "score": 39.91228070175439,
+       "questions": 114,
+       "samples": 456
+      },
+      "bfcl_mt": {
+       "score": 54.8125,
+       "questions": 800,
+       "samples": 3200
+      },
+      "comps": {
+       "score": 83.4349593495935,
+       "questions": 123,
+       "samples": 984
+      },
+      "tau2": {
+       "score": 53.23741007194245,
+       "questions": 278,
+       "samples": 1112
+      }
+     }
+    }
+   }
+  }
  }
 }

@@ -5,7 +5,7 @@ graders and environments: LiveCodeBench v6 (grade_lcb.py), LiveCodeBench Pro (gr
 (grade_ifbench.py, IFBench's env), LongBench Pro (grade_lbp.py, .venv-tools). tau2 and BFCL are graded by run_phase.py
 (tau2_convert.py / bfcl_to_rows.py) when their phase ends. A grades file is rewritten whenever its generations are newer.
 
-    grade.py --results DIR --arm A [--benches b1,b2 | --phase S2] [--force]
+    grade.py --results DIR --arm A [--benches b1,b2 | --phase S2 [--model M]] [--force]
 """
 
 import argparse
@@ -207,6 +207,7 @@ def grade(results, arm, benches, force=False, workers=WORKERS, lcbpro=True):
 
 
 if __name__ == "__main__":
+    import models as M
     import phases as P
 
     ap = argparse.ArgumentParser()
@@ -214,11 +215,13 @@ if __name__ == "__main__":
     ap.add_argument("--arm", required=True)
     ap.add_argument("--benches", default="")
     ap.add_argument("--phase", default="")
+    ap.add_argument("--model", default=P.DEFAULT_MODEL, help="the model whose phases --phase / the default refer to")
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--no-lcbpro", action="store_true", help="leave LiveCodeBench Pro ungraded (judge needs an idle machine)")
     a = ap.parse_args()
-    benches = [b for b in a.benches.split(",") if b] or (P.benches(a.phase) if a.phase else
-                                                         [b for ph in P.ORDER for b in P.benches(ph)])
+    m = M.model_id(a.model)
+    benches = [b for b in a.benches.split(",") if b] or (P.benches(a.phase, m) if a.phase else
+                                                         [b for ph in P.order(m) for b in P.benches(ph, m)])
     st = grade(a.results, a.arm, benches, a.force, lcbpro=not a.no_lcbpro)
     print(json.dumps({a.arm: st}))
     sys.exit(1 if "failed" in st.values() else 0)

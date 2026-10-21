@@ -7,8 +7,13 @@
 2. --shard 0/2 and 1/2 split the jobs of two arms disjointly and completely.
 3. The real scheduling loop (run_jobs) with a stub in place of run_phase.py: every job runs exactly once, at most one
    job per GPU at a time, tau2 jobs serialized per API key, an incomplete job is reported and the others go on.
-    .venv-client/bin/python eval/tests/test_dry_run.py [--tokenizer-from DIR]
-Tokenizer source: --tokenizer-from, else models/Qwen3-8B.
+4. The other models (Qwen3-30B-A3B, Nemotron Nano 9B v2, Nemotron 3 Nano), each whose tokenizer is found: run.py
+   --dry-run for two fake NVFP4 arms with two API keys (the model recognised from the config; its phases, windows,
+   YaRN, server flags, parsers and plugins, prefix caching, first-request sampling / prompts / add_special_tokens / caps,
+   tau2 commands and agent sampling, BFCL handler and first request, alternating tau2 lanes), a --model mismatch refused,
+   and the scheduling loop passing --model and --api-lane to the phase runner.
+    .venv-client/bin/python eval/tests/test_dry_run.py [--tokenizer-from DIR] [--tokenizer-dir MODEL=DIR ...]
+Tokenizer source: --tokenizer-from, else models/Qwen3-8B; other models: --tokenizer-dir, else models/<BF16 or NVFP4 dir>.
 """
 
 import argparse
@@ -32,7 +37,8 @@ a = dict(zip(sys.argv[1::2], sys.argv[2::2]))
 t0 = time.time()
 time.sleep(0.3 + random.random() * 0.5)
 with open(os.environ["STUB_LOG"], "a") as f:
-    f.write(json.dumps(dict(arm=a["--arm"], phase=a["--phase"], gpu=int(a["--gpu"]), t0=t0, t1=time.time())) + "\\n")
+    f.write(json.dumps(dict(arm=a["--arm"], phase=a["--phase"], gpu=int(a["--gpu"]), t0=t0, t1=time.time(),
+                            model=a.get("--model"), lane=a.get("--api-lane"))) + "\\n")
 sys.exit(3 if (a["--arm"], a["--phase"]) == ("fake2", "S3") else 0)
 '''
 
@@ -54,10 +60,119 @@ def fake_checkpoint(src, dst):
     return dst
 
 
+# The other models: tokenizer / config directories under models/ (BF16 or NVIDIA's NVFP4 release), expected settings.
+OTHER = {
+    "qwen3-30b-a3b": dict(dirs=("Qwen3-30B-A3B-NVFP4", "Qwen3-30B-A3B"), phases=["S1", "G", "S3", "S4", "L", "T", "B"],
+                          windows=dict(S1=40960, G=40960, S3=40960, S4=40960, L=131072, T=40960, B=40960), yarn={"L"},
+                          flags=[], parse_phases={"T"}, plugins=False, prefix=True,
+                          sampling=(0.6, 0.95, 20), agent=(0.6, 0.95, 20), add_special=None, comps_cap=38912,
+                          other_cap=32768, prompt_start=None, handler="qadx/qwen3-ct"),
+    "nemotron-nano-9b-v2": dict(dirs=("NVIDIA-Nemotron-Nano-9B-v2", "NVIDIA-Nemotron-Nano-9B-v2-NVFP4"),
+                                phases=["S1", "G", "S3", "L", "T", "B"], windows=dict.fromkeys(["S1", "G", "S3", "L", "T", "B"], 131072),
+                                yarn=set(), flags=["--mamba-ssm-cache-dtype float32"], parse_phases={"T", "B"}, plugins=True,
+                                prefix=False, sampling=(0.6, 0.95, -1), agent=(0.6, 0.95, -1), add_special=False,
+                                comps_cap=32768, other_cap=32768, prompt_start="Solve the following math problem. Make sure",
+                                handler="qadx/nemotron-nano-v2-ct"),
+    "nemotron-3-nano-30b-a3b": dict(dirs=("NVIDIA-Nemotron-3-Nano-30B-A3B-BF16", "NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4"),
+                                    phases=["S1", "G", "S3", "S4", "L", "T", "B"],
+                                    windows=dict(S1=262144, G=262144, S3=262144, S4=262144, L=131072, T=131072, B=131072),
+                                    yarn=set(), flags=["--mamba-ssm-cache-dtype float32 --moe-backend flashinfer_cutlass"],
+                                    parse_phases={"T", "B"}, plugins=False, prefix=False, sampling=(1.0, 1.0, -1),
+                                    agent=(0.6, 0.95, -1), add_special=False, comps_cap=131072, other_cap=131072,
+                                    prompt_start="Solve the following math problem step by step.",
+                                    handler="qadx/nemotron3-nano-ct"),
+}
+
+
+def other_tokenizer(model, given):
+    for c in [given.get(model)] + [C.REPO / "models" / d for d in OTHER[model]["dirs"]]:
+        if c and (Path(c) / "tokenizer_config.json").exists() and (Path(c) / "config.json").exists():
+            return Path(c)
+    return None
+
+
+def check_other_model(model, src, tmp, env, rep):
+    """Dry run of two fake NVFP4 arms of one model (section 4)."""
+    exp = OTHER[model]
+    cks = []
+    for i in (1, 2):
+        ck = fake_checkpoint(src, tmp / f"ckpt-{model}-{i}")
+        (ck / "hf_quant_config.json").write_text(json.dumps({"quantization": {"quant_algo": "NVFP4", "kv_cache_quant_algo": None}}))
+        cks.append(ck)
+    results = tmp / f"results_{model}"
+    env2 = dict(env, QADX_API_KEY_2="dummy-key-2")
+    r = subprocess.run([str(C.CLIENT_PY), str(C.EVAL / "run.py"), "--arm", f"x1={cks[0]}", "--arm", f"x2={cks[1]}",
+                        "--gpus", "0,1,2,3,4,5,6,7", "--dry-run", "--results", str(results)], capture_output=True, text=True, env=env2)
+    out = r.stdout
+    (tmp / f"dry_run_{model}.txt").write_text(out + "\n--- stderr ---\n" + r.stderr)
+    tag = f"{model}:"
+    rep.add(f"{tag} dry run exits 0", r.returncode == 0, r.stderr.strip()[-500:] if r.returncode else "")
+    plan = re.findall(r"t\+\s*([\d.]+) h\s+GPU (\d)\s+(x[12])/(\w+)\s.*?(?:\(API lane (\d)\))?\s+\[(\S+)\]$", out, re.M)
+    rep.add(f"{tag} plan: the model's phases for each arm, model recognised from the config",
+            sorted((p[2], p[3]) for p in plan) == sorted((a, ph) for a in ("x1", "x2") for ph in exp["phases"])
+            and all(p[5] == model for p in plan), " ".join(f"{p[2]}/{p[3]}" for p in plan))
+    lanes = {p[2]: p[4] for p in plan if p[3] == "T"}
+    rep.add(f"{tag} tau2: one phase per arm, the two arms on API lanes 1 and 2", lanes == {"x1": "1", "x2": "2"}, str(lanes))
+    serves = {(a, ph): s for a, ph, s in re.findall(r"## (x[12]) (\w+) on GPU \d: .*?\nserve: (.*)", out)}
+    win = {ph: int(re.search(r"--max-model-len (\d+)", s).group(1)) for (a, ph), s in serves.items() if a == "x1"}
+    rep.add(f"{tag} serve: windows per phase", win == exp["windows"], str(win))
+    rep.add(f"{tag} serve: YaRN exactly for {sorted(exp['yarn']) or 'no phase'}",
+            {ph for (a, ph), s in serves.items() if a == "x1" and "rope_type" in s} == exp["yarn"])
+    rep.add(f"{tag} serve: model flags after the common ones" + (f" ({exp['flags'][0]})" if exp["flags"] else " (none)"),
+            all(s.split("--seed 0", 1)[1].startswith(" " + exp["flags"][0]) if exp["flags"] else "--mamba" not in s and "--moe-backend" not in s
+                for s in serves.values()))
+    rep.add(f"{tag} serve: prefix caching in tau2 / BFCL only " + ("as for Qwen3" if exp["prefix"] else "never (hybrid model)"),
+            all(("--enable-prefix-caching" in s) == (exp["prefix"] and ph in ("T", "B")) for (a, ph), s in serves.items()))
+    rep.add(f"{tag} serve: tool / reasoning parsers in {sorted(exp['parse_phases'])}, generation cap override in T only",
+            all(("--tool-call-parser" in s) == (ph in exp["parse_phases"]) and ("--override-generation-config" in s) == (ph == "T")
+                for (a, ph), s in serves.items()))
+    plug = [s for (a, ph), s in serves.items() if "--tool-parser-plugin" in s]
+    rep.add(f"{tag} serve: parser plugins " + ("loaded from eval/lib/vllm_plugins, mounted read-only" if exp["plugins"] else "none"),
+            (sorted(ph for (a, ph), s in serves.items() if "--tool-parser-plugin" in s and a == "x1") == sorted(exp["parse_phases"])
+             and all(f"{C.LIB / 'vllm_plugins'}:{C.LIB / 'vllm_plugins'}:ro" in s and (C.LIB / "vllm_plugins" / "nemotron_toolcall_parser.py").exists()
+                     for s in plug)) if exp["plugins"] else not plug)
+    posts = {b: json.loads(j) for b, j in re.findall(r"^(\w+): first request = .*?\nPOST /v1/completions (\{.*\})$", out, re.M)}
+    want = {"aime26", "hmmt_feb26", "hmmt_feb25", "hmmt_nov25", "gpqa_diamond", "lcb_v6", "longbench_pro", "mrcr8"} | (
+        {"lcb_pro"} if "S4" in exp["phases"] else set())
+    rep.add(f"{tag} first request for every completion benchmark", set(posts) == want, f"{sorted(want ^ set(posts))}")
+    t, p, k = exp["sampling"]
+    rep.add(f"{tag} first requests: sampling T {t} / top-p {p} / top-k {k}, add_special_tokens "
+            + ("absent" if exp["add_special"] is None else str(exp["add_special"])),
+            all(b["temperature"] == t and b["top_p"] == p and b["top_k"] == k and b["min_p"] == 0.0 and b["skip_special_tokens"] is False
+                and b.get("add_special_tokens", None) == exp["add_special"] and b["model"] == "eval-model" for b in posts.values()))
+    caps = {b: v["max_tokens"] for b, v in posts.items()}
+    rep.add(f"{tag} first requests: budgets within the caps",
+            all(c <= (exp["comps_cap"] if b.startswith(("aime", "hmmt")) else exp["other_cap"] if b not in ("longbench_pro", "mrcr8") else 32768)
+                for b, c in caps.items()), json.dumps(caps))
+    ps = posts.get("aime26", {}).get("prompt", "")
+    rep.add(f"{tag} competition prompt: " + ("NVIDIA's evaluation prompt" if exp["prompt_start"] else "the item as it is"),
+            (exp["prompt_start"] in ps) if exp["prompt_start"] else ("Please reason step by step" in ps), ps[:120].replace("\n", " "))
+    tau2 = re.findall(r"^tau2 (\w+): (.*)$", out, re.M)
+    ta, tp, tk = exp["agent"]
+    agent_ok = all(json.loads(re.search(r"--agent-llm-args (\{.*?\}) --user-llm", c).group(1)) | {"api_base": None} ==
+                   {"api_base": None, "api_key": "EMPTY", "temperature": ta, "top_p": tp, "top_k": tk, "min_p": 0.0} for _, c in tau2)
+    rep.add(f"{tag} tau2: 3 domains per arm in one phase, seed 300, 4 trials, agent sampling T {ta} / top-p {tp} / top-k {tk}",
+            sorted(d for d, _ in tau2) == sorted(["airline", "retail", "telecom"] * 2) and agent_ok
+            and all("--seed 300" in c and "--num-trials 4" in c and "--max-concurrency 48" in c for _, c in tau2))
+    keys = re.findall(r"^## (x[12]) T on.*?\n.*?\nuser simulator / judge: .* with (QADX_API_KEY(?:_2)?) ", out, re.M)
+    rep.add(f"{tag} tau2: the arms use the two keys", dict(keys) == {"x1": "QADX_API_KEY", "x2": "QADX_API_KEY_2"}, str(keys))
+    bf = re.findall(r"^bfcl: .*$", out, re.M)
+    rep.add(f"{tag} bfcl: handler {exp['handler']}, 4 generate + 4 evaluate commands per arm, first request rendered",
+            len(bf) == 16 and all(f"--model {exp['handler']} " in c for c in bf) and out.count("bfcl first request (multi_turn_base_0") == 2,
+            next((l for l in out.splitlines() if "could not render" in l), "")[:300])
+    r2 = subprocess.run([str(C.CLIENT_PY), str(C.EVAL / "run.py"), "--arm", f"x1={cks[0]}", "--model", "qwen3-8b", "--dry-run",
+                         "--results", str(results)], capture_output=True, text=True, env=env)
+    rep.add(f"{tag} --model qwen3-8b refused for this checkpoint", r2.returncode != 0 and "checkpoint" in r2.stderr,
+            r2.stderr.strip()[-200:])
+    return cks
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tokenizer-from")
+    ap.add_argument("--tokenizer-dir", action="append", default=[], help="MODEL=DIR: tokenizer and config of another model")
     a = ap.parse_args()
+    given = dict(x.split("=", 1) for x in a.tokenizer_dir)
     rep = C.Report("scheduler")
     tmp = Path(tempfile.mkdtemp(prefix="qadx_sched_"))
     ck = fake_checkpoint(tokenizer_source(a.tokenizer_from), tmp / "ckpt-fake")
@@ -156,6 +271,35 @@ def main():
     rep.add("stub run: tau2 jobs serialized on one API key", not any(overlap(a, b) for i, a in enumerate(t2) for b in t2[i + 1:]))
     rep.add("stub run: the incomplete job is reported, the rest complete", [j.name for j in failed] == ["fake2/S3"],
             str([j.name for j in failed]))
+    rep.add("stub run: Qwen3-8B jobs get no --model / --api-lane (the phase runner's defaults)",
+            all(r["model"] is None and r["lane"] is None for r in runs))
+
+    # 4. the other models
+    stub_ck = None
+    for model in OTHER:
+        src = other_tokenizer(model, given)
+        if src is None:
+            rep.add(f"{model}: dry run", None, f"no tokenizer (models/{OTHER[model]['dirs'][0]} or --tokenizer-dir {model}=DIR)")
+            continue
+        cks = check_other_model(model, src, tmp, env, rep)
+        stub_ck = stub_ck or (model, cks)
+    if stub_ck:
+        model, cks = stub_ck
+        os.environ["QADX_API_KEY_2"] = "dummy-key-2"
+        log3 = tmp / "stub_log_other.jsonl"
+        os.environ["STUB_LOG"] = str(log3)
+        res3 = tmp / "results_stub_other"
+        (res3 / "logs").mkdir(parents=True)
+        RUN.LOG = res3 / "logs" / "scheduler.log"
+        jobs = [RUN.Job(arm, str(ck), ph, i, model, n) for i, (n, arm, ck, ph) in
+                enumerate((n, f"o{n}", ck, ph) for n, ck in enumerate(cks) for ph in ("T", "S1"))]
+        failed, _ = RUN.run_jobs(sorted(jobs, key=lambda j: (-j.hours, j.idx)), [0, 1], args, res3)
+        runs = C.load_jsonl(log3)
+        rep.add(f"stub run ({model}): --model and alternating --api-lane passed to the phase runner",
+                not failed and sorted((r["arm"], r["phase"], r["model"], r["lane"]) for r in runs) ==
+                sorted([("o0", "T", model, "1"), ("o0", "S1", model, None), ("o1", "T", model, "2"), ("o1", "S1", model, None)]),
+                str(sorted((r["arm"], r["phase"], r["model"], r["lane"]) for r in runs)))
+        os.environ.pop("QADX_API_KEY_2", None)
     print(f"work dir {tmp}")
     rep.done()
 

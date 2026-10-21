@@ -1,16 +1,17 @@
-"""The vLLM server of one phase: the pinned docker image on one GPU, the same flags for every arm.
+"""The vLLM server of one phase: the pinned docker image on one GPU, the same flags for every arm of a model.
 
     docker run --rm --name qadx_vllm_gpu<i> --gpus device=<i> --ipc=host --net=host
-        -v <ckpt>:<ckpt>:ro [-v <repo>/.cache/vllm/gpu<i>:/root/.cache/vllm]
+        -v <ckpt>:<ckpt>:ro [-v <repo>/eval/lib/vllm_plugins:<same>:ro] [-v <repo>/.cache/vllm/gpu<i>:/root/.cache/vllm]
         vllm/vllm-openai@sha256:... <ckpt>
         --served-model-name eval-model --host 127.0.0.1 --port <8100+i> --max-model-len <N> --language-model-only
-        --gpu-memory-utilization 0.90 --max-num-seqs 256 --no-enable-prefix-caching --seed 0 <phase args>
+        --gpu-memory-utilization 0.90 --max-num-seqs 256 --no-enable-prefix-caching --seed 0 <model args> <phase args>
 
 The checkpoint directory is mounted at its host path, so the path the server loads is the path the client tokenizer
-reads. Defaults that matter but are not passed: --kv-cache-dtype auto (FP8 E4M3 KV with scale 1.0 for checkpoints whose
-hf_quant_config declares kv_cache_quant_algo FP8, i.e. NVIDIA's NVFP4 release and NVFP4 QAD exports; BF16 KV for the BF16
-checkpoint) and --generation-config auto (the checkpoint's generation_config.json supplies any sampling field a request
-omits). The server seed is fixed (--seed 0) and requests carry no seed, so with the fixed request order a rerun of the
+reads; so is the parser-plugin directory when a phase loads a plugin (models.py). Defaults that matter but are not
+passed: --kv-cache-dtype auto (FP8 E4M3 KV with scale 1.0 for checkpoints whose hf_quant_config declares
+kv_cache_quant_algo FP8, e.g. NVIDIA's NVFP4 releases of the Qwen3 models and the QAD exports of Qwen3 and Nemotron 3
+Nano; BF16 KV otherwise) and --generation-config auto (the checkpoint's generation_config.json supplies any sampling
+field a request omits). The server seed is fixed (--seed 0) and requests carry no seed, so with the fixed request order a rerun of the
 same phase on the same build replays the same tokens closely; independent repeats need another server seed.
 """
 
@@ -37,15 +38,24 @@ def container(gpu):
     return f"{PREFIX}_vllm_gpu{gpu}"
 
 
-def phase_server_args(phase_cfg, kind):
-    """Arguments appended for a phase, in the order the reference harness appends them."""
-    args = []
+def phase_server_args(phase_cfg, kind, model=M.DEFAULT_MODEL, checkpoint=None):
+    """Arguments appended for a phase, in the order the reference harness appends them: the model's flags (models.py
+    server_args, then quant_server_args for an NVFP4 checkpoint), then the phase's."""
+    spec = M.spec(model)
+    args = list(spec["server_args"]) + (list(spec["quant_server_args"]) if checkpoint and M.is_nvfp4(checkpoint) else [])
     if phase_cfg["yarn"]:
-        args += ["--hf-overrides", json.dumps(M.YARN)]
-    if kind in ("tau2", "bfcl"):  # agent phases resend long, growing prefixes
+        args += ["--hf-overrides", json.dumps(spec["yarn"])]
+    if kind in ("tau2", "bfcl") and spec["agent_prefix_cache"]:  # agent phases resend long, growing prefixes
         args += ["--enable-prefix-caching"]
-    if kind == "tau2":  # tau2 expects tool calls and reasoning parsed server-side, as from an OpenAI endpoint
-        args += ["--enable-auto-tool-choice", "--tool-call-parser", M.TOOL_PARSER, "--reasoning-parser", M.REASONING_PARSER]
+    # tau2 expects tool calls and reasoning parsed server-side, as from an OpenAI endpoint; so does BFCL for the models
+    # whose handler uses the chat endpoint (bfcl_server_parsing)
+    if kind == "tau2" or (kind == "bfcl" and spec["bfcl_server_parsing"]):
+        if spec["tool_parser_plugin"]:
+            args += ["--tool-parser-plugin", M.plugin_path(spec["tool_parser_plugin"])]
+        if spec["reasoning_parser_plugin"]:
+            args += ["--reasoning-parser-plugin", M.plugin_path(spec["reasoning_parser_plugin"])]
+        args += ["--enable-auto-tool-choice", "--tool-call-parser", spec["tool_parser"], "--reasoning-parser", spec["reasoning_parser"]]
+    if kind == "tau2":
         # tau2 sends no max_tokens: vLLM rejects a request whose prompt + max_tokens exceeds the window instead of
         # clamping, while the server default max_new_tokens is clamped to window - prompt.
         cap = int(phase_cfg["tasks"].split(",")[0].split(":")[2])
@@ -63,6 +73,9 @@ def serve_cmd(checkpoint, gpu, max_model_len, extra, compile_cache=True):
     """The full docker command line. compile_cache mounts a per-GPU torch.compile / FlashInfer autotune cache under
     .cache/vllm (only startup time changes; one directory per GPU so concurrent servers never write the same files)."""
     mounts = ["-v", f"{checkpoint}:{checkpoint}:ro"]
+    if any(a in ("--tool-parser-plugin", "--reasoning-parser-plugin") for a in extra):  # parser plugins at their host path
+        plugins = paths.LIB / "vllm_plugins"
+        mounts += ["-v", f"{plugins}:{plugins}:ro"]
     if compile_cache:
         mounts += ["-v", f"{paths.CACHE / 'vllm' / f'gpu{gpu}'}:/root/.cache/vllm"]
     return (["docker", "run", "--rm", "--name", container(gpu), "--gpus", f"device={gpu}", "--ipc=host", "--net=host"]
