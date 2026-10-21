@@ -1,0 +1,73 @@
+# Megatron-Core PTQ/QAD recipe for Nemotron 3 Nano 30B-A3B that mirrors the
+# checkpoint the QAD starts from and the rollout servers load (a ModelOpt PTQ of the BF16 model with NVIDIA's release
+# layer map, NVIDIA's static scales imported). Same layer map, formats and
+# static scales as NVIDIA's release nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4:
+#   Mamba in_proj / out_proj (17 of 23 Mamba layers), routed experts (128 x up/down, 23 MoE layers),
+#   shared experts (up/down, 23 MoE layers)                                                   NVFP4 W4A4 (block 16)
+#   Mamba layers 4, 11, 18, 25, 32, 41 (the one before each attention layer), attention q/k/v/o
+#   (layers 5, 12, 19, 26, 33, 42), router (gate + e_score_correction_bias), conv1d, norms,
+#   embeddings, output layer                                                                  BF16
+#   KV cache                                                       FP8, scale 1.0 (no k/v_scale tensors in either checkpoint)
+# 5968 quantized linears in the HF checkpoint (5968 input_scale + 5968 weight_scale_2). Megatron names: one layer per pattern
+# character (hybrid_override_pattern MEMEM*EMEMEM*...EME, 52 layers), so layer N here is layer N of the HF checkpoint;
+# MambaLayer mixer.in_proj / out_proj; MoETransformerLayer mlp.experts.linear_fc1 / fc2 (TEGroupedMLP: the layout ModelOpt
+# picks for NemotronH, one input quantizer and one weight quantizer per expert) and mlp.shared_experts.linear_fc1 / fc2;
+# attention self_attention.linear_qkv / linear_proj / core_attention.
+# Expected enabled quantizers (grouped layout): 126 input (34 Mamba + 46 grouped experts + 46 shared), 126 weight modules
+# (= 34 + 23 x 2 x 128 + 46 = 5968 per-expert/per-linear weight quantizers), 18 bmm (q/k/v x 6 attention layers).
+# NOT expressible here, done by the importer at train start (qad_distill CL_IMPORT_INPUT_SCALE, item 19):
+#   - routed-expert weight_scale_2: NVIDIA/nvscale share ONE per layer and projection (max over the 128 experts); max
+#     calibration on TEGroupedMLP gives every expert its own amax and sync_expert_weight_amax only acts on SequentialMLP
+#     -> set each expert's weight_quantizer[i].amax = weight_scale_2 * 6 * 448 from the checkpoint;
+#   - every input_scale (incl. 128 equal expert scales per layer/projection and the shared experts).
+# Layer-indexed selectors: run quantize.py with --pp_size 1 (global layer numbers); at other PP sizes the quantizer enable
+# state comes from the checkpoint's extra_state (as for Nano V2).
+# KV: vLLM 0.29 serves this model with the FLASHINFER attention backend, FP8 KV and no q scale (q_scale := k_scale = 1.0),
+# so Q is cast to FP8 too (vLLM's server log: "Checkpoint does not provide a q scaling factor") -> FP8 cast on Q, K and V
+# (constant amax 448), as recipes/nvfp4_w4a4-qkv_fp8_cast_mcore.yaml. Do NOT disable '*self_attention.*' as the Nano V2
+# recipe does: it would also match core_attention.[qkv]_bmm_quantizer.
+# modelopt-schema: modelopt.recipe.config.ModelOptPTQRecipe
+
+imports:
+  base_disable_all: configs/ptq/units/base_disable_all
+  default_disabled_quantizers: configs/ptq/units/default_disabled_quantizers
+  fp8: configs/numerics/fp8
+  w4a4_nvfp4_nvfp4: configs/ptq/units/w4a4_nvfp4_nvfp4
+
+metadata:
+  recipe_type: ptq
+  description: >-
+    Nemotron 3 Nano 30B-A3B, NVIDIA release layer map: NVFP4 W4A4 on Mamba in_proj / out_proj (except layers 4, 11, 18, 25,
+    32, 41), routed experts and shared experts; attention q/k/v/o, router, conv1d, embeddings, output layer in BF16;
+    FP8 cast (scale 1.0) on Q, K and V in the 6 attention layers.
+
+quantize:
+  algorithm: max
+  quant_cfg:
+    - $import: base_disable_all
+    - $import: w4a4_nvfp4_nvfp4
+    # Mamba layers kept BF16 in the release (the layer before each attention layer)
+    - quantizer_name: '*decoder.layers.4.mixer.*'
+      enable: false
+    - quantizer_name: '*decoder.layers.11.mixer.*'
+      enable: false
+    - quantizer_name: '*decoder.layers.18.mixer.*'
+      enable: false
+    - quantizer_name: '*decoder.layers.25.mixer.*'
+      enable: false
+    - quantizer_name: '*decoder.layers.32.mixer.*'
+      enable: false
+    - quantizer_name: '*decoder.layers.41.mixer.*'
+      enable: false
+    # attention linears BF16 (all 6 attention layers); only the linears, so the bmm quantizers below stay enabled
+    - quantizer_name: '*self_attention.linear_qkv*'
+      enable: false
+    - quantizer_name: '*self_attention.linear_proj*'
+      enable: false
+    # FP8 cast (constant amax 448, scale 1.0) on Q, K and V: vLLM FlashInfer + FP8 KV, q_scale = k_scale = 1.0
+    - quantizer_name: '*[qkv]_bmm_quantizer'
+      cfg:
+        $import: fp8
+        use_constant_amax: true
+    # router (*router*), output layer, conv1d, embeddings
+    - $import: default_disabled_quantizers

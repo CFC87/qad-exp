@@ -1,0 +1,53 @@
+{
+ "name": "mix_r4_n3_s20261021",
+ "model": "NVIDIA-Nemotron-3-Nano-30B-A3B-BF16",
+ "stage": "one run (window 131,072): all five domains",
+ "description": "round-4 mixed list: all five domains",
+ "train_ranks": [
+  0,
+  57674
+ ],
+ "val_ranks": [
+  57674,
+  57974
+ ],
+ "validation": "300 single-turn prompts shared by every list (ranks val_ranks)",
+ "length_col": "len_n3",
+ "steps_of_data": {
+  "reasoning": 60,
+  "code": 60,
+  "bfcl": 30,
+  "tau2": 30,
+  "long": 60
+ },
+ "rows": {
+  "reasoning": 18568,
+  "code": 13348,
+  "bfcl": 8717,
+  "tau2": 2353,
+  "long": 9445
+ },
+ "buffer_rows": {
+  "reasoning": 1857,
+  "code": 1335,
+  "bfcl": 872,
+  "tau2": 235,
+  "long": 944
+ },
+ "packed_tokens_target": {
+  "reasoning": 259840964,
+  "code": 258842136,
+  "bfcl": 116703020,
+  "tau2": 136883414,
+  "long": 239834180
+ },
+ "packed_tokens_estimate": {
+  "reasoning": 259850438,
+  "code": 258847307,
+  "bfcl": 116710134,
+  "tau2": 136893569,
+  "long": 239835409
+ },
+ "columns": "mix_domain (reasoning / code / bfcl / tau2 / long / val), mix_part (main / buffer), mix_src_rank (rank in its source list)",
+ "rule": "Round-4 mix of five domains: reasoning (math competition / StackExchange, plus a fixed science part), competitive-programming code (hard original problems once each, plus infinibyte problems 70 % long / 30 % short by reference answer length), multi-turn function calling (cut at an assistant turn, one generated turn, history supervised), multi-turn customer service played end to end (with 10 % long math reasoning rows), and long-context documents / retrieval. Each domain's rows keep their own order; the domains are interleaved so that every prefix holds the same fraction of each domain (row i of a domain with n rows at (i + 0.5) / n), then a 10 % buffer of further rows per domain. Each domain is cut where it holds about the packed tokens of N training steps of this model (reasoning 60, code 60, function calling 30, customer service 30, long context 60), estimated from this model's own prompt lengths and its answer lengths relative to the reference model on the same benchmarks."
+}

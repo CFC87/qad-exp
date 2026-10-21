@@ -1,0 +1,19 @@
+# Qwen3-30B-A3B, stage 1 of 2: reasoning, code, function calling and customer service with its native RoPE (window
+# 40,960), 180 steps, WSD decay over the last 30; weights exported at 150, 160 and 180 (r4-q30-s150 / s160 / s180).
+include = "base_mt.toml"
+name = "r4-q30"
+model = "Qwen3-30B-A3B"
+checkpoint = "Qwen3-30B-A3B-NVFP4"     # rollout start; its input scales become the student's activation scales
+subset = "mix_r4_s1_q30_s20261021"
+rope = "plain"
+window = 40960
+budgets = [180]
+decays = [30]
+keep_weights = [150, 160]
+lr = 1e-5
+min_lr = 1e-6
+val_n = 187
+expected_json = "train/configs/expected_bench_8b.json"   # Qwen3 family starting estimates; the controller corrects them online
+
+[optimizer_overrides]           # 1node: 4 pipeline stages of a 30B-class student need part of the optimizer on the CPU (fp32 kept)
+1node = { use_precision_aware_optimizer = true, optimizer_cpu_offload = true, optimizer_offload_fraction = 0.5, overlap_cpu_optimizer_d2h_h2d = true }

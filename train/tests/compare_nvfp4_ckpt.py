@@ -2,9 +2,9 @@
 
     .venv-client/bin/python train/tests/compare_nvfp4_ckpt.py A_DIR B_DIR
 
-For every tensor name in both: exact equality (bitwise, after viewing as bytes), and for float tensors the max absolute
-difference. Summary per tensor kind (weight, weight_scale, weight_scale_2, input_scale, k_scale, v_scale, other) and
-the names only in one side.
+For every tensor name in both: exact equality (bitwise, after viewing as bytes; float tensors of another float dtype count
+as equal when their values are, and are reported), and for float tensors the max absolute difference. Summary per
+tensor kind (weight, weight_scale, weight_scale_2, input_scale, k_scale, v_scale, other) and the names only in one side.
 """
 import glob, os, sys
 from collections import defaultdict
@@ -42,6 +42,11 @@ def main():
     for k in sorted(set(A) & set(B)):
         a, b = get(A[k]), get(B[k])
         s = stat[kind(k)]; s['n'] += 1
+        if a.shape == b.shape and a.dtype != b.dtype and a.is_floating_point() and b.is_floating_point() \
+                and torch.equal(a.double(), b.double()):
+            # the same values in another float dtype (Nemotron 3 Nano: the export writes the router gate in its fp32
+            # moe_router_dtype, the PTQ start checkpoint stores it as bf16; the values are the bf16 ones)
+            s['equal'] += 1; s.setdefault('dtype_only', 0); s['dtype_only'] += 1; continue
         if a.shape != b.shape or a.dtype != b.dtype:
             s['worst'] = (k, 'shape/dtype %s %s vs %s %s' % (tuple(a.shape), a.dtype, tuple(b.shape), b.dtype)); continue
         if torch.equal(a.reshape(-1).contiguous().view(torch.uint8), b.reshape(-1).contiguous().view(torch.uint8)):
@@ -54,7 +59,9 @@ def main():
         if d > s['maxdiff']:
             s['maxdiff'], s['worst'] = d, (k, 'max diff %.3g (rel %.3g)' % (d, rel))
     for t, s in sorted(stat.items()):
-        print('%-15s %4d tensors, %4d bitwise equal%s' % (t, s['n'], s['equal'], ('; worst %s: %s' % s['worst']) if s['worst'] else ''))
+        print('%-15s %4d tensors, %4d bitwise equal%s%s' % (t, s['n'], s['equal'],
+              (' (%d of them equal in value, other dtype)' % s['dtype_only']) if s.get('dtype_only') else '',
+              ('; worst %s: %s' % s['worst']) if s['worst'] else ''))
     print('only in A: %d %s' % (len(only_a), only_a[:5]))
     print('only in B: %d %s' % (len(only_b), only_b[:5]))
 

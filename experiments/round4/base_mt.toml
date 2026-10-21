@@ -1,0 +1,47 @@
+# base.toml plus the multi-turn settings of the lists with customer-service conversations (every round-4 list except
+# Qwen3-30B-A3B's long-context stage 2).
+include = "base.toml"
+scenario_cards = ["data/subsets/tau2_cut_mt_25k_s20261001/scenario_cards_v2_final.parquet"]
+
+[multiturn."SFT-Agentic-v2/interactive_agent"]   # customer service, played end to end; the simulator acts the customer from a scenario card
+env = "sim"
+mode = "each"
+require_card = true
+log = true
+cost_prior = 6.6
+
+[multiturn."Agentic-v1/interactive_agent"]
+env = "sim"
+mode = "each"
+require_card = true
+log = true
+cost_prior = 7.8
+
+[multiturn."RL-Agentic-Conversational-Tool-Use-Pivot-v1"]
+env = "sim"
+mode = "each"
+require_card = true
+log = true
+cost_prior = 5.4
+
+[multiturn."SFT-Agentic-v2/tool_calling"]          # function calling inside the customer-service portion: user turns replayed,
+env = "replay_tools"                                # tool results simulated. The function-calling portion (subset *_b1) matches
+mode = "each"                                       # no key and is trained single turn at its cut
+log = true
+cost_prior = 6.7
+
+[multiturn."Agentic-v1/tool_calling"]
+env = "replay_tools"
+mode = "each"
+log = true
+cost_prior = 8.3
+
+[multiturn."RL-Agentic-Function-Calling-Pivot-v1"]
+env = "replay_tools"
+mode = "each"
+log = true
+cost_prior = 7.8
+
+[simulator]                     # multi-turn user / tool simulator
+model = "openai/gpt-oss-120b"   # the endpoint id of gpt-oss-120b; override with QADX_SIM_MODEL
+reasoning_effort = "low"

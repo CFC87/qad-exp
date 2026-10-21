@@ -180,7 +180,44 @@ def parse_assistant_n9(text):
     return msg, ok
 
 
-PARSERS = {'qwen3': parse_assistant, 'n9': parse_assistant_n9}
+PARSE_URL = None  # Nemotron 3 Nano: the parse service (parse_service.py, vLLM 0.29's parser); set by rollout.py (parse_url)
+
+
+def parse_assistant_n3(text, tools=None):
+    """Nemotron 3 Nano: completion text after the generation prompt ("...<|im_start|>assistant\n<think>\n") -> (chat
+    message, ok), parsed by vLLM 0.29's NemotronV3Parser itself (reasoning before </think>, qwen3_coder XML tool calls,
+    parameter values typed by the tool schema), the parser the τ² / BFCL evaluation servers run, through parse_service.py
+    (the controller's vLLM 0.25.1 has an older copy). As parse_assistant: a reply with neither content nor a call, a
+    <tool_call> left in the content (no call parsed from it) or a parse failure is ok False. Arguments become dicts (its
+    chat template renders tool_call.arguments|items, as vLLM's chat path converts them)."""
+    import requests
+    txt = text.split('<|im_end|>')[0]
+    try:
+        r = requests.post(PARSE_URL + '/parse', json={'text': txt, 'tools': tools or []}, timeout=60)
+        r.raise_for_status()
+        p = r.json()
+        calls = [{'type': 'function', 'function': {'name': c['name'], 'arguments': json.loads(c['arguments'] or '{}')}}
+                 for c in p['tool_calls']]
+        if not all(isinstance(c['function']['arguments'], dict) for c in calls):
+            raise ValueError('arguments not an object')
+        ok = True
+    except Exception:
+        p, calls, ok = {'reasoning': None, 'content': txt}, [], False
+    content = (p.get('content') or '').strip()
+    if not calls and '<tool_call>' in content:
+        ok = False
+    msg = {'role': 'assistant', 'content': content}
+    if (p.get('reasoning') or '').strip('\n'):
+        msg['reasoning_content'] = p['reasoning'].strip('\n')
+    if calls:
+        msg['tool_calls'] = calls
+    if not calls and not msg['content']:
+        ok = False
+    return msg, ok
+
+
+PARSERS = {'qwen3': parse_assistant, 'n9': parse_assistant_n9, 'n3': parse_assistant_n3}
+TOOLS_PARSERS = {'n3'}  # these take the episode's tools and run in a thread (an HTTP call)
 
 
 class ReplayEnv:
@@ -371,6 +408,24 @@ and giving the details it asks for (from your scenario) is part of your tasks, n
 - Once your last task has been handled, output only '###STOP###'. Do not write a thank-you or goodbye message instead: \
 '###STOP###' is the whole message.
 """
+GRANT_RULES = """Self-service steps: some steps in your instructions are actions you complete yourself on your side (\
+confirming, approving, verifying something). You can do such a step only after the representative has given you access \
+to it: you then see a line "[Access granted: ...]" in the representative's message. Never say you did the step, and never \
+report its result, before that line has appeared for it; until then ask the representative how to proceed. Once access \
+is granted, do the step and report its result as your instructions say."""
+
+
+def _granted(call):
+    """the self-service action a grant call hands over, in words (give_discoverable_user_tool's discoverable_tool_name)"""
+    a = (call.get('function') or call).get('arguments')
+    try:
+        a = json.loads(a) if isinstance(a, str) else (a or {})
+    except ValueError:
+        a = {}
+    n = str(a.get('discoverable_tool_name') or a.get('tool_name') or a.get('name') or 'the action')
+    return n.replace('_', ' ')
+
+
 USER_SIM_CARD_STRICT = USER_SIM_CARD.replace('\n\n<scenario>', '\n' + STRICT_END_RULES.format(them='representative').rstrip('\n') + '\n\n<scenario>', 1)
 USER_SIM_STRICT = USER_SIM.replace('\n\n<reference>', '\n' + STRICT_END_RULES.format(them='assistant').rstrip('\n') + '\n\n<reference>', 1)
 assert USER_SIM_CARD_STRICT != USER_SIM_CARD and USER_SIM_STRICT != USER_SIM
@@ -555,11 +610,18 @@ class SimEnv:
     """An LLM plays the user and the tools (see the module docstring)."""
 
     def __init__(self, msgs, tools, sim, *, max_user_turns=None, max_tokens=2048, n_ref=24000, n_ref_tool=160000, scenario=False,
-                 card=None, tool_max_tokens=8192, closed_world=True, strict_end=True, schema_check=True):
+                 card=None, tool_max_tokens=8192, closed_world=True, strict_end=True, schema_check=True, read_extra=None,
+                 grant_tool=None):
         """scenario: the simulator first writes a scenario card from the stored conversation (one extra call) and the
         user simulator then sees only the card, with NeMo-Gym's prompt (it cannot copy later stored requests early);
         False: the user simulator sees the stored conversation itself (USER_SIM)"""
         self.sim, self.max_tokens, self.tool_max_tokens = sim, max_tokens, tool_max_tokens
+        # read_extra (regex on the tool name): more read-like tools for a set whose read tools READ_TOOL does not know
+        # (e.g. inspect_* / semantically_find_* / grep_* / shell), so they are not counted as writes; grant_tool: the
+        # agent's tool that hands the customer a self-service action (give_discoverable_user_tool): the customer simulator
+        # sees "[Access granted: ...]" after a successful call and may do / report the step only then. Both off by default
+        self.read_extra = re.compile(read_extra) if read_extra else None
+        self.grant_tool = grant_tool
         # closed world (customer service): an identifier argument whose value appears nowhere in what the backend knows
         # (system prompt, tool definitions, the recorded conversation, the card, this episode's tool results) is a record
         # that does not exist -> "Error: ... not found", as τ²'s backend answers; without it the simulator accepted 14 of
@@ -607,7 +669,7 @@ class SimEnv:
                 self.recorded.setdefault((_call_key(c), w), o.get('content'))
                 self.recorded_norm.setdefault((_norm_key(c), w), o.get('content'))
                 self.by_tool.setdefault(_call_key(c)[0], []).append(o.get('content') or '')
-                if _is_write(c, o.get('content')):
+                if self._write(c, o.get('content')):
                     w += (_norm_key(c),)
         n_user = sum(m.get('role') == 'user' for m in msgs)
         self.max_user_turns = max_user_turns or n_user + 3
@@ -647,11 +709,21 @@ class SimEnv:
         else:
             m = [{'role': 'system', 'content': (USER_SIM_STRICT if self.strict_end else USER_SIM).format(reference=self.ref_user)}]
             them = me = ''
-        for x in conv:  # roles swapped: the simulator writes the user's turns
+        if self.grant_tool:
+            m[0]['content'] += '\n\n' + GRANT_RULES
+        for i, x in enumerate(conv):  # roles swapped: the simulator writes the user's turns
             if x.get('role') == 'user':
                 m.append({'role': 'assistant', 'content': me + (x.get('content') or '')})
-            elif x.get('role') == 'assistant' and (x.get('content') or '').strip():
-                m.append({'role': 'user', 'content': them + x['content']})
+            elif x.get('role') == 'assistant':
+                txt = (x.get('content') or '').strip()
+                if self.grant_tool:
+                    calls = x.get('tool_calls') or []
+                    outs = [y for y in conv[i + 1:i + 1 + len(calls)] if y.get('role') == 'tool']
+                    for c, o in zip(calls, outs):
+                        if (c.get('function') or c).get('name') == self.grant_tool and not _is_error(o.get('content')):
+                            txt += '\n[Access granted: you can now do this yourself: %s]' % _granted(c)
+                if txt.strip():
+                    m.append({'role': 'user', 'content': them + txt.strip()})
         if m[-1]['role'] != 'user':  # the student's turn had no visible text
             m.append({'role': 'user', 'content': them + '(no reply)'})
         self.counts['user_sim'] += 1
@@ -675,9 +747,14 @@ class SimEnv:
             self.rejected[nk] += 1
             if self.rejected[nk] >= REJECT_REPEAT:
                 self.stuck, self.stuck_why = True, self.stuck_why or 'stopped: repeated rejected call'
-        if _is_write(call, out):
+        if self._write(call, out):
             self.writes += (_norm_key(call),)
         return out
+
+    def _write(self, call, result):
+        if self.read_extra and self.read_extra.search(str((call.get('function') or call).get('name') or '')):
+            return False
+        return _is_write(call, result)
 
     async def _tool_result(self, conv, call):
         k = (_call_key(call), self.writes)
@@ -961,7 +1038,8 @@ async def run_episode(gen, tok, msgs, tools, *, window, cap, tkw=None, mode='las
         try:
             for attempt in range(retries + 1):
                 resp, fin, lp = await within(gen(ids, mt))
-                msg, ok = parse(tok.decode(resp, skip_special_tokens=False))
+                dec = tok.decode(resp, skip_special_tokens=False)
+                msg, ok = (await asyncio.to_thread(parse, dec, tools)) if fam in TOOLS_PARSERS else parse(dec)
                 if not guard or (fin != 'length' and ok):
                     break
                 resampled += 1

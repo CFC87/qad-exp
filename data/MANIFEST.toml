@@ -1,4 +1,5 @@
-# Training data: GitHub release assets of this repository, fetched by `setup/setup.sh data`.
+# Training data: GitHub release assets of this repository, fetched by `setup/setup.sh data`. An asset is fetched from
+# the release `release` names, its own `release` when it has one (data-v2: the round-4 lists).
 release = "data-v1"
 repo = "CFC87/qad-exp"
 # Each asset is checked against its sha256 and placed at `path`.
@@ -27,3 +28,36 @@ sha256 = "ecf9d6b9d2fc354e28ba65f7ea5eb32a4c19cc93b0b7d6837f56586703e78a7d"
 path = "data/subsets/dom_agent_e2e_25k_s20261004/scenario_cards_final.parquet"
 sha256 = "df9f7f68f7da37d9f5e44685afe3b2ab584e579a84d30cabcc8815cc83f2887c"
 # one scenario card per customer-service conversation (the simulated customer plays from it), keyed by prompt_id
+
+# Round 4 (experiments/round4): the mixed lists of Qwen3-30B-A3B (two stages), Nemotron Nano 9B v2 and Nemotron 3 Nano,
+# and the scenario cards of their customer-service conversations
+
+[assets."mix_r4_s1_q30_s20261021.parquet"]
+release = "data-v2"
+path = "data/subsets/mix_r4_s1_q30_s20261021/subset.parquet"
+sha256 = "636c9d2ead849bf191ed1bc5c0437171a95189134c7f46b10dbb41bf240b14af"
+# 184 MB
+
+[assets."mix_r4_s2_long_q30_s20261021.parquet"]
+release = "data-v2"
+path = "data/subsets/mix_r4_s2_long_q30_s20261021/subset.parquet"
+sha256 = "fd8c1c20dd942f946be551dfa8e1e2824091d82967738df57722a063edcfb7b2"
+# 210 MB
+
+[assets."mix_r4_n9_s20261021.parquet"]
+release = "data-v2"
+path = "data/subsets/mix_r4_n9_s20261021/subset.parquet"
+sha256 = "db48f761e515c0882f7a70af1488f007c92b61c967a116cbd82c06d95b06fbaa"
+# 362 MB
+
+[assets."mix_r4_n3_s20261021.parquet"]
+release = "data-v2"
+path = "data/subsets/mix_r4_n3_s20261021/subset.parquet"
+sha256 = "d86ab1dad46d4537e424527e9989923032213212e4ae3eda9afb3224cc4c4757"
+# 360 MB
+
+[assets."tau2_cut_mt_25k_s20261001.scenario_cards.parquet"]
+release = "data-v2"
+path = "data/subsets/tau2_cut_mt_25k_s20261001/scenario_cards_v2_final.parquet"
+sha256 = "0712753a32df33d14983bc776f35340b09050f3f9367140ea38a71e0577a88e5"
+# 12 MB

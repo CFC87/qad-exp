@@ -211,6 +211,9 @@ class SubsetSource:
             cols.append('exp_gen')  # the student's predicted E[min(response, 32K)] per prompt (length sets)
         if 'subset' in names:
             cols.append('subset')  # per-subset multi-turn config (rollout.py)
+        for c in ('response', 'len_response'):  # offline traces: a row with a response is trained as written,
+            if c in names:                        # without generation (rollout.py); len_response is checked at rendering
+                cols.append(c)
         for c in ('cut_at', 'n_est'):  # stored-cut sets (multi-turn): the trained turn and its size
             if c in names:
                 cols.append(c)
@@ -224,6 +227,14 @@ class SubsetSource:
         # predicted response per prompt (-1: none, e.g. validation rows); top-up picks prompts by prompt + prediction
         self.exp = (np.nan_to_num(self.rows.column('exp_gen').to_numpy(zero_copy_only=False).astype(float), nan=-1.0)
                     if 'exp_gen' in self.rows.column_names else np.full(len(self.n), -1.0))
+        self.exp_onp = self.exp  # without the offline traces (offline_phase(False): their rows are generated)
+        if 'len_response' in self.rows.column_names:  # offline traces: the response length is known exactly
+            lr = np.nan_to_num(self.rows.column('len_response').to_numpy(zero_copy_only=False).astype(float), nan=-1.0)
+            self.exp = np.where(lr >= 0, lr, self.exp)
+        self.exp_off = self.exp
+        self.offline = (np.array([x is not None for x in self.rows.column('response').to_pylist()])
+                        if 'response' in self.rows.column_names else np.zeros(len(keep), bool))  # rows with a trace
+        self.use_offline = True  # offline_phase(False): the traces are ignored, every row is generated
         self.ds = self.rows.column('dataset').to_pylist()
         self.used_flag = np.zeros(len(keep), bool)
         self.head, self.lookahead, self.handed = 0, lookahead, 0
@@ -283,8 +294,15 @@ class SubsetSource:
                 n_h, row['hist_' + self.fam], row['dataset'], row['prompt_id'])
         ids = self.bos + ids
         eg = row.get('exp_gen')
+        resp_ids = None
+        if row.get('response') is not None and self.use_offline:  # offline trace: the response as written (its loss covers it like a generated one)
+            resp_ids = self.tok(row['response'], add_special_tokens=False)['input_ids']
+            if row.get('len_response') is not None:
+                assert len(resp_ids) == row['len_response'], 'response rendered %d tokens, subset says %d (%s %s)' % (
+                    len(resp_ids), row['len_response'], row['dataset'], row['prompt_id'])
+            eg = len(resp_ids)
         return dict(dataset=row['dataset'], prompt_id=row['prompt_id'], ids=ids, n=len(ids), rank=int(row['rank']),
-                    exp=float(eg) if eg is not None and eg == eg else None, hist_spans=spans,
+                    exp=float(eg) if eg is not None and eg == eg else None, hist_spans=spans, resp_ids=resp_ids,
                     msgs=msgs, tools=tools, subset=row.get('subset'),  # conversation + subset: multi-turn (multiturn.py)
                     cut_at=row.get('cut_at'), n_est=row.get('n_est'))
 
@@ -303,6 +321,12 @@ class SubsetSource:
         hit = np.isin(r, np.fromiter(ranks, np.int64, len(ranks)))
         self.handed += int((hit & ~self.used_flag).sum())
         self.used_flag |= hit
+
+    def offline_phase(self, on):
+        """on: a row with an offline trace is trained as written (the default); off: the traces are ignored, every row
+        is generated (rollout.py offline_until). The order of the rows is the same either way."""
+        self.use_offline = bool(on)
+        self.exp = self.exp_off if on else self.exp_onp
 
     def update_expected(self, dataset, response_tokens, alpha=0.05):
         old = self.expected.get(dataset, 4000.0)

@@ -43,8 +43,39 @@ ONPOLICY = REPO / "train" / "onpolicy"
 CTL_PORT, SRV_PORT0, THR_PORT0, TORCH_PORT = 18800, 8021, 8290, 29500
 YARN = {"rope_parameters": {"rope_type": "yarn", "factor": 4.0, "original_max_position_embeddings": 32768,
                             "rope_theta": 1000000, "beta_fast": 32.0, "beta_slow": 1.0, "truncate": True}}
-SAMPLING = {"temperature": 0.6, "top_p": 0.95, "top_k": 20, "min_p": 0.0}   # the model's deployment sampling
-LAYERS = {"Qwen3-8B": 36}
+QWEN3_SAMPLING = {"temperature": 0.6, "top_p": 0.95, "top_k": 20, "min_p": 0.0}   # each model's deployment sampling
+QWEN3_SERVE = ["--kv-cache-dtype", "fp8", "--enable-prefix-caching"]
+NEMOTRON_SERVE = ["--mamba-ssm-cache-dtype", "float32", "--no-enable-prefix-caching"]
+# Per model (the experiment's `model` = the BF16 folder under models/): layers, the subset's length column for its
+# tokenizer and chat template, rollout sampling, vLLM flags, the Megatron PTQ recipe (train/recipes/), and:
+#   yarn       Qwen3: a `rope = "yarn"` experiment runs YaRN x4 (servers: --hf-overrides; trainer: a YaRN config copy)
+#   tok_ckpt   tokenizer from the experiment's `checkpoint` (Nemotron: the start checkpoint has the same ids and template)
+#   moe_graph  vLLM's MoE weight updates under CUDA graphs need train/vllm_moe_graph_patch.py in every server worker
+#   pad_id     MoE: the packs' pad id, kept out of the router statistics (qad_distill CL_MOE_PAD_ID)
+#   bad_ids    responses are cut at these token ids (untrained embedding rows); mock_vocab: mock-data ids for tests
+#   parse      multi-turn turns are parsed by vLLM 0.29's own parser (train/onpolicy/parse_service.py)
+#   kv         the export's KV cache algorithm; release: NVIDIA's NVFP4 release whose exclude list the export carries
+#   bias_rate0 the router expert bias moves every step whatever the LR: the step-0 check freezes it
+#   step0_gpus GPUs (pipeline stages) of the step-0 check: a 30B-class student does not fit one GPU
+MODELS = {
+    "Qwen3-8B": dict(layers=36, length_col="len_qwen3", sampling=QWEN3_SAMPLING, serve=QWEN3_SERVE,
+                     recipe="nvfp4_w4a4-qkv_fp8_cast_mcore.yaml", yarn=True, kv="FP8", step0_gpus=1),
+    "Qwen3-30B-A3B": dict(layers=48, length_col="len_qwen3", sampling=QWEN3_SAMPLING, serve=QWEN3_SERVE,
+                          recipe="nvfp4_w4a4-qkv_fp8_cast_mcore.yaml", yarn=True, kv="FP8", moe_graph=True, pad_id=151643,
+                          step0_gpus=4),
+    "NVIDIA-Nemotron-Nano-9B-v2": dict(layers=56, length_col="len_n9",
+                                       sampling={"temperature": 0.6, "top_p": 0.95, "top_k": -1, "min_p": 0.0},
+                                       serve=NEMOTRON_SERVE, recipe="nemotron_nano_v2_nvfp4_w4a4_mcore.yaml", tok_ckpt=True,
+                                       bad_ids="train/onpolicy/n9_degenerate_ids.json", mock_vocab=1100, kv=None,
+                                       release="NVIDIA-Nemotron-Nano-9B-v2-NVFP4", step0_gpus=1),
+    "NVIDIA-Nemotron-3-Nano-30B-A3B-BF16": dict(layers=52, length_col="len_n3",
+                                                sampling={"temperature": 1.0, "top_p": 1.0, "top_k": -1, "min_p": 0.0},
+                                                serve=NEMOTRON_SERVE + ["--moe-backend", "flashinfer_cutlass"],
+                                                recipe="nemotron_3_nano_nvfp4_w4a4_mcore.yaml", tok_ckpt=True, moe_graph=True,
+                                                pad_id=11, parse="nemotron_v3", kv="FP8", bias_rate0=True,
+                                                release="NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4", step0_gpus=4),
+}
+PARSE_PORT = 8295
 
 
 # ----------------------------------------------------------------------------------------------------------- config
@@ -79,9 +110,23 @@ class Chain:
         self.peer = getattr(args, "peer", None)
         self.peer_ip = getattr(args, "peer_ip", None)
         self.model = c["model"]
+        assert self.model in MODELS, f"model {self.model}: one of {sorted(MODELS)}"
+        self.spec = MODELS[self.model]
         self.models = REPO / "models"
         self.subset = REPO / "data" / "subsets" / c["subset"]
         self.ptq = f"ptq-{self.model}-nvfp4-qkv"
+        self.yarn = c.get("rope", "plain") == "yarn"
+        assert not self.yarn or self.spec.get("yarn"), f"{self.model} has no YaRN mode"
+        # the HF folder the trainer (student and teacher structure, weight push) reads: a YaRN config copy for YaRN runs
+        self.hf_train = f"/out/hfy/{self.model}" if self.yarn else f"/models/{self.model}"
+        # extra weights-only checkpoints kept and exported besides each budget (each a multiple of eval_every inside a
+        # segment), and an offset added to the step in export names (a run continuing another one from its step N)
+        self.keep_weights = sorted(int(x) for x in c.get("keep_weights", []))
+        assert all(x % c["eval_every"] == 0 and 0 < x <= self.budgets[-1] for x in self.keep_weights), "keep_weights"
+        self.export_offset = int(c.get("export_offset", 0))
+        # init_from: a segment of another chain (same OUT) whose last weights-only checkpoint this chain starts from
+        # (new optimizer and schedule, step 0)
+        self.init_from = c.get("init_from")
         self.log_path = self.out / f"{self.name}.chain.log"
 
     # -------------------------------------------------------------------------------------------------- utilities
@@ -105,6 +150,17 @@ class Chain:
     def bp(self, i):
         return self.budgets[i] - self.decays[i]
 
+    def kw(self, i):
+        """keep_weights steps of segment i (after its branch point, up to its budget)"""
+        lo = self.bp(i - 1) if i > 0 else 0
+        return [x for x in self.keep_weights if lo < x <= self.budgets[i]]
+
+    def export_name(self, step):  # export_prefix: one name for the exports of a run trained in two chains
+        return f"{self.cfg.get('export_prefix', self.name)}-s{step + self.export_offset:03d}"
+
+    def export_steps(self):
+        return [(i, x) for i in range(len(self.budgets)) for x in self.kw(i) + [self.budgets[i]]]
+
     def sched_json(self, i):
         return json.dumps({"lr_decay_style": "WSD", "lr_wsd_decay_style": "minus_sqrt", "lr_wsd_decay_iters": self.decays[i],
                            "start_weight_decay": 0.0, "end_weight_decay": 0.0, "weight_decay": 0.0,
@@ -121,7 +177,7 @@ class Chain:
         self.die("--layout 1node or 2node")
 
     def pp_split(self, pp):
-        n = LAYERS[self.model]
+        n = self.spec["layers"]
         if n % pp == 0:
             return n // pp, n // pp
         for f in range(n // pp, 0, -1):  # equal first / last stages, the middle stages equal and >= them
@@ -159,15 +215,18 @@ class Chain:
         return sh(argv, capture=True)
 
     def servers_up(self, L, window):
-        serve = ["--kv-cache-dtype", "fp8", "--enable-prefix-caching"]
-        if self.cfg.get("rope", "plain") == "yarn":
+        serve, extra = list(self.spec["serve"]), []
+        if self.yarn:
             serve += ["--hf-overrides", json.dumps(YARN)]
+        if self.spec.get("moe_graph"):  # the patch module, imported in every worker before the model is built
+            serve += ["--worker-extension-cls", "vllm_moe_graph_patch.MoeGraphPatchExt"]
+            extra = ["-v", f"{REPO / 'train'}:/ops:ro", "-e", "PYTHONPATH=/ops"]
         urls = []
         for j, g in enumerate(L["serve_gpus"]):
             port = SRV_PORT0 + j
             name = f"qadx-vroll-{j}"
             argv = ["docker", "run", "-d", "--name", name, "--gpus", f"device={g}", "--ipc=host", "--net=host",
-                    "-e", "VLLM_SERVER_DEV_MODE=1", "-e", "VLLM_HTTP_TIMEOUT_KEEP_ALIVE=60", *self.env_passthrough(),
+                    "-e", "VLLM_SERVER_DEV_MODE=1", "-e", "VLLM_HTTP_TIMEOUT_KEEP_ALIVE=60", *self.env_passthrough(), *extra,
                     "-v", f"{self.models}:/models:ro", "-v", f"{REPO / '.cache' / 'vllm' / str(j)}:/root/.cache/vllm",  # one cache per server
                     IMG_VLLM, f"/models/{self.cfg['checkpoint']}", "--served-model-name", "student", "--port", str(port),
                     "--max-model-len", str(window), "--gpu-memory-utilization", "0.88", "--max-num-seqs", str(self.cfg["max_num_seqs"]),
@@ -217,7 +276,29 @@ class Chain:
                 self.die(f"throttle {i} did not come up")
             urls.append(f"http://127.0.0.1:{port}")
         self.log(f"API throttles up: {len(urls)} key(s), {os.environ.get('QADX_SIM_RPS', '1.0')}/s each at most")
+        self.parse_up()
         return urls
+
+    def parse_up(self):
+        """Multi-turn turns of a model whose evaluation parses them with vLLM 0.29's own parser (Nemotron 3 Nano): that
+        parser as a CPU-only service in the serving image on this node (train/onpolicy/parse_service.py), as the
+        controller's vLLM 0.25.1 has an older copy of it."""
+        if not (self.spec.get("parse") and self.cfg.get("multiturn")):
+            return
+        url = f"http://127.0.0.1:{PARSE_PORT}"
+        if http_ok(url + "/health"):
+            self.die(f"port {PARSE_PORT} is already served (a parse service from an earlier run?): run `stop` first")
+        sh(["docker", "rm", "-f", "qadx-parse"], check=False, quiet=True)
+        sh(["docker", "run", "-d", "--name", "qadx-parse", "--net=host", "--entrypoint", "python3",
+            "-v", f"{self.models / self.cfg['checkpoint']}:/tok:ro", "-v", f"{ONPOLICY}:/ops:ro", IMG_VLLM,
+            "/ops/parse_service.py", "--port", str(PARSE_PORT), "--parser", self.spec["parse"]], capture=True)
+        for _ in range(60):
+            if http_ok(url + "/health"):
+                break
+            time.sleep(2)
+        else:
+            self.die("parse service did not come up (docker logs qadx-parse)")
+        self.log(f"parse service up: {url} (vLLM 0.29 {self.spec['parse']})")
 
     def controller_cfg(self, i, run_dir, urls, thr_urls, start_step):
         c = self.cfg
@@ -233,11 +314,15 @@ class Chain:
         cards = [str(REPO / p) for p in c.get("scenario_cards", [])]
         cfg = dict(vllm=urls, model="student", W=131072, window=c["window"], n_packs=c["n_packs"], max_packs=c["gbs"],
                    target_packs=c["target_packs"], cap=c["cap"], steps=self.budgets[i], start_step=start_step, port=CTL_PORT,
-                   log_dir=str(run_dir), tokenizer_dir=str(self.models / self.model), add_bos=False, subset=str(self.subset),
-                   train_ranks=meta["train_ranks"], val_ranks=meta["val_ranks"], length_col="len_qwen3", val_n=c["val_n"],
-                   val_every=c["eval_every"], sample_every=c["eval_every"], n_samples=8, sampling=SAMPLING,
-                   expected_response=json.loads((REPO / c["expected_json"]).read_text()), bad_ids_file=None,
-                   hist_sup=bool(c["hist_sup"]), multiturn=mt, scenario_cards=cards or None)
+                   log_dir=str(run_dir), tokenizer_dir=str(self.models / (c["checkpoint"] if self.spec.get("tok_ckpt") else self.model)),
+                   add_bos=False, subset=str(self.subset), train_ranks=meta["train_ranks"], val_ranks=meta["val_ranks"],
+                   length_col=self.spec["length_col"], val_n=c["val_n"],
+                   val_every=c["eval_every"], sample_every=c["eval_every"], n_samples=8, sampling=self.spec["sampling"],
+                   expected_response=json.loads((REPO / c["expected_json"]).read_text()),
+                   bad_ids_file=str(REPO / self.spec["bad_ids"]) if self.spec.get("bad_ids") else None,
+                   hist_sup=bool(c["hist_sup"]), multiturn=mt, scenario_cards=cards or None, pad_id=self.spec.get("pad_id"),
+                   parse_url=f"http://127.0.0.1:{PARSE_PORT}" if self.spec.get("parse") and mt else None,
+                   wait_init=bool(self.init_from) and i == 0)  # started from a trained checkpoint: step 0 waits for its push
         return cfg
 
     def controller_up(self, i, run_dir, urls, thr_urls, start_step):
@@ -271,16 +356,23 @@ class Chain:
         first, last = self.pp_split(pp)
         env = {"HF_HUB_OFFLINE": "1", "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True", "PYTHONPATH": "/v029",
                "CL_ONPOLICY_FEED": f"http://127.0.0.1:{CTL_PORT}", "CL_WEIGHT_PUSH_URL": ",".join(urls),
-               "CL_WEIGHT_PUSH_HF": f"/models/{self.model}", "CL_WEIGHT_PUSH_SENDER": "0", "CL_CHUNKED_KD": "8192",
+               "CL_WEIGHT_PUSH_HF": self.hf_train, "CL_WEIGHT_PUSH_SENDER": "0", "CL_CHUNKED_KD": "8192",
                "CL_IMPORT_INPUT_SCALE": f"/models/{c['checkpoint']}", "CL_CKPT_LATEST_FULL": "1",
                "CL_PROVIDER_OVERRIDES": json.dumps({"num_layers_in_first_pipeline_stage": first, "num_layers_in_last_pipeline_stage": last,
                                                     "calculate_per_token_loss": True, "seq_length": 131072}),
                "CL_SCHEDULER_OVERRIDES": self.sched_json(i)}
         if self.keep(i) is not None:
             env["CL_KEEP_FULL_STEPS"] = str(self.keep(i))
+        if self.spec.get("pad_id") is not None:
+            env["CL_MOE_PAD_ID"] = str(self.spec["pad_id"])
+        opt = (c.get("optimizer_overrides") or {}).get(self.layout)
+        if opt:  # e.g. partial CPU offload of the optimizer (30B class, 1node)
+            env["CL_OPTIMIZER_OVERRIDES"] = json.dumps(opt)
+        if self.init_from and i == 0:
+            env["CL_PRETRAINED"] = f"/out/{s}.init/checkpoints"
         cmd = ["torchrun", "--nnodes", "1", "--nproc-per-node", str(pp), "--master-addr", "127.0.0.1", "--master-port", str(TORCH_PORT),
-               "/cl/qad_distill.py", "--pp_size", str(pp), "--student_hf_path", f"/models/{self.model}",
-               "--student_megatron_path", f"/out/{self.ptq}", "--teacher_hf_path", f"/models/{self.model}", "--use_mock_data",
+               "/cl/qad_distill.py", "--pp_size", str(pp), "--student_hf_path", self.hf_train,
+               "--student_megatron_path", f"/out/{self.ptq}", "--teacher_hf_path", self.hf_train, "--use_mock_data",
                "--seq_length", "131072", "--mbs", "1", "--gbs", str(c["gbs"]), "--train_iters", str(self.budgets[i]),
                "--eval_interval", str(c["eval_every"]), "--eval_iters", "1", "--save_interval", str(c["eval_every"]), "--no_async_save",
                "--log_interval", "1", "--lr", str(c["lr"]), "--min_lr", str(c["min_lr"]), "--lr_warmup_iters", str(c["warmup"]),
@@ -306,6 +398,7 @@ class Chain:
             rd = self.out / "runs" / self.seg(i)
             if rd.exists():
                 self.kill_spawned(rd)
+        sh(["docker", "rm", "-f", "qadx-parse"], check=False, quiet=True)
         if L:
             self.servers_down(L)
         self.log("stopped")
@@ -359,6 +452,14 @@ class Chain:
                 self.die(f"branch checkpoint setup failed: {out[-500:]}")
             self.log(out.strip().splitlines()[-1])
         run_dir.mkdir(parents=True, exist_ok=True)
+        if self.init_from and i == 0 and resume_step is None:
+            out = sh(["docker", "run", "--rm", "-v", f"{self.out}:/out", "--entrypoint", "bash", IMG_NEMO, "-c",
+                      init_cmd(f"/out/train/{self.init_from}/checkpoints", f"/out/train/{s}.init/checkpoints")], capture=True, check=False)
+            if "INIT_CKPT_OK" not in out:
+                self.die(f"start checkpoint from {self.init_from} failed: {out[-500:]}")
+            self.log(out.strip().splitlines()[-1])
+        if self.yarn:
+            self.hfy_up()
         self.preflight(L)
         self.log(f"launch {s} ({act} at step {start}, to step {self.budgets[i]}, decay {self.decays[i]}, keep full at {self.keep(i)})")
         thr = self.throttles_up(run_dir)
@@ -366,6 +467,20 @@ class Chain:
         self.controller_up(i, run_dir, urls, thr, start)
         self.trainer_up(i, L, urls, start)
         self.log(f"TRAINING_STARTED {s}")
+
+    def hfy_up(self):
+        """OUT/train/hfy/<model>: the BF16 model with a YaRN x4 config (max_position_embeddings 131072; beta_fast 32,
+        beta_slow 1 and truncate true written out: Megatron-Bridge does not fill in HF's defaults), the other files
+        symlinked to /models/<model> (resolved inside the containers), for the trainer's student, teacher and weight push."""
+        d = f"/out/train/hfy/{self.model}"
+        cfg = json.loads((self.models / self.model / "config.json").read_text())
+        cfg["rope_scaling"] = {"rope_type": "yarn", "factor": 4.0, "original_max_position_embeddings": 32768, "beta_fast": 32.0,
+                               "beta_slow": 1.0, "truncate": True}
+        cfg["max_position_embeddings"] = 131072
+        files = [f.name for f in (self.models / self.model).iterdir() if f.is_file() and f.name != "config.json"]
+        self.root(f"mkdir -p {d} && cd {d} && " + " && ".join(f"ln -sfn /models/{self.model}/{shlex.quote(f)} {shlex.quote(f)}" for f in files)
+                  + f" && printf %s {shlex.quote(json.dumps(cfg, indent=2))} > config.json")
+        self.log(f"YaRN config folder {d} ({len(files)} files linked)")
 
     def wait_done(self, i, L):
         s = self.seg(i)
@@ -407,7 +522,7 @@ class Chain:
         """While segment i trains: drop its weights-only saves older than the newest one (except its last step and keep
         step), and the parent's kept full checkpoint once this segment has a full checkpoint of its own past the branch."""
         s, k = self.seg(i), self.keep(i)
-        keep_w = {self.budgets[i]} | ({k} if k is not None else set())
+        keep_w = {self.budgets[i]} | ({k} if k is not None else set()) | set(self.kw(i))
         cmd = (f"cd /out/train/{s}/checkpoints 2>/dev/null || exit 0; W=$(cat latest_checkpointed_iteration.txt 2>/dev/null); "
                f"for d in iter_*; do [ -d \"$d\" ] || continue; n=$((10#${{d#iter_}})); "
                f"[ -n \"$W\" ] && [ $n -lt $W ] && ! echo ' {' '.join(map(str, keep_w))} ' | grep -q \" $n \" && rm -rf \"$d\" && echo \"trim $d\"; done")
@@ -426,7 +541,7 @@ class Chain:
             s, k = self.seg(i), self.keep(i)
             if not (self.out / "runs" / s / "CHAIN_DONE").exists():
                 continue
-            kw = {f"iter_{self.budgets[i]:07d}"} | ({f"iter_{k:07d}"} if k is not None else set())
+            kw = {f"iter_{self.budgets[i]:07d}"} | ({f"iter_{k:07d}"} if k is not None else set()) | {f"iter_{x:07d}" for x in self.kw(i)}
             kf = f"non_persistent/iter_{k:07d}" if k is not None else ""
             out = self.root(f"cd /out/train/{s}/checkpoints 2>/dev/null || exit 0; "
                             f"for d in iter_*; do case \" {' '.join(sorted(kw))} \" in *\" $d \"*) ;; *) rm -rf \"$d\" && echo \"$d\";; esac; done; "
@@ -436,31 +551,47 @@ class Chain:
 
     # ---------------------------------------------------------------------------------------------------- export
     def export(self):
-        for i, b in enumerate(self.budgets):
+        """Each finished segment's keep_weights steps and budget -> OUT/exports/<name>-s<step + export_offset>/. Checks:
+        NVFP4, the model's KV algorithm, Qwen3 with its native RoPE config (YaRN only ever comes from the evaluation's
+        --yarn); Nemotron: the quantized layers equal the NVIDIA release's layer map, whose exclude list is then written
+        (train/prep/fix_ptq_config.py)."""
+        for i, step in self.export_steps():
             s = self.seg(i)
             if not (self.out / "runs" / s / "CHAIN_DONE").exists():
                 self.log(f"export: {s} is not done, skipped")
                 continue
-            d = f"{self.name}-s{b:03d}"
+            d = self.export_name(step)
             dst = self.out / "exports" / d
             if (dst / "hf_quant_config.json").exists():
                 self.log(f"{dst} exists: not exported again")
                 continue
-            self.log(f"export {s} step {b}")
+            self.log(f"export {s} step {step}")
             (self.out / "train" / "exports").mkdir(parents=True, exist_ok=True)
             self.nemo_run([0], f"qadx-export-{d}", ["torchrun", "--nproc-per-node", "1", "export_quantized_megatron_to_hf.py",
                                                     "--hf_model_name_or_path", f"/models/{self.model}",
-                                                    "--megatron_path", f"/out/{s}/checkpoints/iter_{b:07d}",
+                                                    "--megatron_path", f"/out/{s}/checkpoints/iter_{step:07d}",
                                                     "--export_unified_hf_path", f"/out/exports/{d}"],
                           env={"HF_HUB_OFFLINE": "1"}, detach=False)
             uid, gid = os.getuid(), os.getgid()
             self.root(f"chown -R {uid}:{gid} /out/train/exports/{d}")
             dst.parent.mkdir(parents=True, exist_ok=True)
             os.replace(self.out / "train" / "exports" / d, dst)
+            if self.spec.get("release"):
+                ref = json.loads((self.models / self.spec["release"] / "hf_quant_config.json").read_text())["quantization"]["exclude_modules"]
+                rp = dst / "release_exclude.json"
+                rp.write_text(json.dumps(ref))
+                fx = sh([str(PY), str(REPO / "train" / "prep" / "fix_ptq_config.py"), str(dst), str(rp), str(self.spec["kv"] or "none")],
+                        capture=True, check=False)
+                rp.unlink()
+                self.log(fx.strip())
+                if "PTQ_CHECK OK" not in fx:
+                    self.die(f"export {dst}: its quantized layers differ from the release's layer map")
             q = json.loads((dst / "hf_quant_config.json").read_text())["quantization"]
             conf = json.loads((dst / "config.json").read_text())
-            ok = (q["quant_algo"] == "NVFP4" and str(q.get("kv_cache_quant_algo")) == "FP8" and any(dst.glob("*.safetensors"))
-                  and not conf.get("rope_scaling") and (conf.get("rope_parameters") or {}).get("rope_type", "default") == "default")
+            rope_ok = not self.spec.get("yarn") or (not conf.get("rope_scaling") and
+                                                     (conf.get("rope_parameters") or {}).get("rope_type", "default") == "default")
+            ok = (q["quant_algo"] == "NVFP4" and q.get("kv_cache_quant_algo") == self.spec["kv"] and any(dst.glob("*.safetensors"))
+                  and rope_ok)
             if not ok:
                 self.die(f"export {dst} failed its checks: {q}")
             self.log(f"EXPORTED {dst}")
@@ -492,16 +623,38 @@ class Chain:
         self.prune()
 
     def prepare(self):
-        """The Megatron PTQ student (fake-quant NVFP4 W4A4 + FP8 Q/K/V cast). Calibration does not matter for the result:
-        weight scales come from max|W|, Q/K/V use a constant amax, and every activation scale is replaced at train start
-        by the evaluated checkpoint's input_scale (CL_IMPORT_INPUT_SCALE)."""
+        """Once per model: (1) Nemotron: the start checkpoint models/<checkpoint> (train/prep/build_ptqs.py: quantized
+        from BF16 at the NVIDIA release's static scales, CPU, checked tensor by tensor against
+        train/prep/ptqs/<checkpoint>/tensors.sha256; Qwen3 starts from NVIDIA's release itself); (2) the Megatron PTQ
+        student (fake-quant NVFP4 W4A4 with the model's recipe in train/recipes/). Calibration does not matter for the
+        student: weight scales come from max|W| (routed experts: imported at train start), Q/K/V use a constant amax, and
+        every activation scale is replaced at train start by the start checkpoint's (CL_IMPORT_INPUT_SCALE)."""
+        ck = self.models / self.cfg["checkpoint"]
+        if self.spec.get("release") and not (ck / "hf_quant_config.json").exists():
+            ref = REPO / "train" / "prep" / "ptqs" / self.cfg["checkpoint"]
+            self.log(f"building the start checkpoint {ck} (CPU)")
+            mo = REPO / "third_party" / "Model-Optimizer"
+            sp = "/opt/venv/lib/python3.12/site-packages"
+            out = sh(["docker", "run", "--rm", "--entrypoint", "python3", "-v", f"{mo}/modelopt:{sp}/modelopt:ro",
+                      "-v", f"{self.models}:/models", "-v", f"{REPO / 'train'}:/train:ro", IMG_NEMO, "/train/prep/build_ptqs.py",
+                      "--bf16", f"/models/{self.model}", "--release", f"/models/{self.spec['release']}",
+                      "--configs", f"/train/prep/ptqs/{self.cfg['checkpoint']}", "--out", f"/models/{self.cfg['checkpoint']}",
+                      "--check", f"/train/prep/ptqs/{self.cfg['checkpoint']}/tensors.sha256"], capture=True, check=False)
+            lines = [l for l in out.splitlines() if l.startswith("build_ptqs")]
+            self.log("\n".join(lines) or out[-1000:])
+            if not any("tensors match" in l for l in lines) or "differ" in "".join(lines):
+                self.die(f"start checkpoint {ck} does not match {ref / 'tensors.sha256'}: remove it and report")
+            sh(["docker", "run", "--rm", "-v", f"{self.models}:/models", "--entrypoint", "bash", IMG_NEMO, "-c",
+                f"chown -R {os.getuid()}:{os.getgid()} /models/{self.cfg['checkpoint']}"], check=False)
+        elif self.spec.get("release"):
+            self.log(f"{ck} exists")
         dst = self.out / "train" / self.ptq
         if dst.exists():
             self.log(f"{dst} exists")
             return
         self.log(f"building {dst}")
         self.nemo_run([0], "qadx-ptq", ["torchrun", "--nproc-per-node", "1", "quantize.py", "--hf_model_name_or_path", f"/models/{self.model}",
-                                        "--recipe", "/cl/recipes/nvfp4_w4a4-qkv_fp8_cast_mcore.yaml", "--calib_dataset_name", "cnn_dailymail",
+                                        "--recipe", f"/cl/recipes/{self.spec['recipe']}", "--calib_dataset_name", "cnn_dailymail",
                                         "--calib_num_samples", "64", "--seq_length", "1024", "--skip_generate",
                                         "--export_megatron_path", f"/out/{self.ptq}"], detach=False)
         if not dst.exists():
@@ -529,18 +682,33 @@ class Chain:
                   f"PP {pp} ({first}/../{last}), servers {urls} -> {d}")
 
     def check_step0(self):
-        """Step 0 of training must be the evaluated checkpoint: load the PTQ student, import the checkpoint's input scales,
+        """Step 0 of training must be the start checkpoint: load the PTQ student, import the checkpoint's static scales,
         run one step at learning rate 0 (weights unchanged), save, export to Hugging Face format, and compare every
-        tensor with the checkpoint. Expected: every weight, weight_scale, weight_scale_2 and input_scale identical (the
-        checkpoint's k_scale / v_scale = 1.0 have no counterpart in the export). One GPU (GPU 0), about 15 minutes."""
+        tensor with the checkpoint. Expected: every weight, weight_scale, weight_scale_2 and input_scale identical; a
+        float tensor in another dtype counts as equal when its values are (Nemotron 3 Nano: the router gate is exported
+        in fp32, stored in bf16); FP8-cast k_scale / v_scale = 1.0 may exist on one side only. GPUs 0.. (one for an
+        8B-class model; four, pipeline parallel, for a 30B-class one, whose student with its optimizer does not fit one
+        GPU). Nemotron 3 Nano: the router expert bias moves every step whatever the learning rate, so it is frozen here."""
         d = "check-step0"
+        n = self.spec["step0_gpus"]
         self.root(f"rm -rf /out/train/{d} /out/train/{d}-hf")
-        rc = self.nemo_run([0], "qadx-check-step0", [
-            "torchrun", "--nproc-per-node", "1", "/cl/qad_distill.py", "--pp_size", "1", "--student_hf_path", f"/models/{self.model}",
+        env = {"HF_HUB_OFFLINE": "1", "CL_NO_OPTIM_CKPT": "1", "CL_IMPORT_INPUT_SCALE": f"/models/{self.cfg['checkpoint']}"}
+        if self.spec.get("mock_vocab"):
+            env["CL_MOCK_VOCAB"] = str(self.spec["mock_vocab"])
+        if self.spec.get("bias_rate0"):
+            env["CL_PROVIDER_OVERRIDES"] = json.dumps({"moe_router_bias_update_rate": 0.0})
+        if n > 1:
+            f, l = self.pp_split(n)
+            ov = json.loads(env.get("CL_PROVIDER_OVERRIDES", "{}"))
+            ov.update(num_layers_in_first_pipeline_stage=f, num_layers_in_last_pipeline_stage=l)
+            env["CL_PROVIDER_OVERRIDES"] = json.dumps(ov)
+        rc = self.nemo_run(list(range(n)), "qadx-check-step0", [
+            "torchrun", "--nproc-per-node", str(n), "--master-addr", "127.0.0.1", "--master-port", str(TORCH_PORT),
+            "/cl/qad_distill.py", "--pp_size", str(n), "--student_hf_path", f"/models/{self.model}",
             "--student_megatron_path", f"/out/{self.ptq}", "--teacher_hf_path", f"/models/{self.model}", "--use_mock_data",
-            "--seq_length", "2048", "--mbs", "1", "--gbs", "1", "--train_iters", "1", "--eval_iters", "0", "--lr", "0", "--min_lr", "0",
+            "--seq_length", "2048", "--mbs", "1", "--gbs", str(n), "--train_iters", "1", "--eval_iters", "0", "--lr", "0", "--min_lr", "0",
             "--lr_warmup_iters", "0", "--save_interval", "1", "--no_async_save", "--log_interval", "1", "--output_dir", f"/out/{d}"],
-            env={"HF_HUB_OFFLINE": "1", "CL_NO_OPTIM_CKPT": "1", "CL_IMPORT_INPUT_SCALE": f"/models/{self.cfg['checkpoint']}"}, detach=False)
+            env=env, detach=False)
         self.log("\n".join(l for l in rc.splitlines() if "imported" in l or "Traceback" in l or "Error" in l)[-2000:] or "step done")
         self.nemo_run([0], "qadx-check-step0-export", ["torchrun", "--nproc-per-node", "1", "export_quantized_megatron_to_hf.py",
                                                        "--hf_model_name_or_path", f"/models/{self.model}",
@@ -556,9 +724,9 @@ class Chain:
     def clean(self):
         """After every budget is exported: remove the chain's trainer checkpoints (OUT/train/<segment>), keeping the
         controller logs (OUT/runs) and the exports. Refuses while an export is missing."""
-        missing = [b for b in self.budgets if not (self.out / "exports" / f"{self.name}-s{b:03d}" / "hf_quant_config.json").exists()]
+        missing = [x for _, x in self.export_steps() if not (self.out / "exports" / self.export_name(x) / "hf_quant_config.json").exists()]
         if missing:
-            self.die(f"not cleaned: budgets {missing} are not exported yet")
+            self.die(f"not cleaned: steps {missing} are not exported yet")
         for i in range(len(self.budgets)):
             self.root(f"rm -rf /out/train/{self.seg(i)}")
         self.log(f"cleaned: trainer checkpoints of {self.name} removed (exports and controller logs kept)")
@@ -567,6 +735,28 @@ class Chain:
         for i in range(len(self.budgets)):
             print(f"{self.seg(i)}: {self.state(i)}")
         print("controller:", http_get(f"http://127.0.0.1:{CTL_PORT}/status") or "down")
+
+
+def init_cmd(src, dst):
+    """A chain's start checkpoint from another chain's last weights-only checkpoint (init_from): its latest iteration laid
+    out in DST with its trackers, shard files hard-linked, everything else copied; qad_distill reads it as a pretrained
+    checkpoint (CL_PRETRAINED: weights only, step 0, a new optimizer and schedule)."""
+    return f"""set -e
+S={src}; D={dst}
+it=$(cat $S/latest_checkpointed_iteration.txt | tr -dc 0-9); IT=$(printf iter_%07d $it)
+test -d $S/$IT || {{ echo INIT_CKPT_FAIL no $S/$IT; exit 1; }}
+if test -e $D/$IT; then echo "INIT_CKPT_OK $IT: exists"; exit 0; fi
+mkdir -p $D/$IT; cd $S/$IT
+find . -mindepth 1 -type d -printf '%P\\0' | while IFS= read -r -d '' d; do mkdir -p "$D/$IT/$d"; done
+nl=0; nc=0
+while IFS= read -r -d '' f; do
+  case "$f" in __*.distcp) ln "$f" "$D/$IT/$f"; nl=$((nl + 1)); continue ;; esac
+  cp -p --sparse=always "$f" "$D/$IT/$f"; nc=$((nc + 1))
+done < <(find . -type f -printf '%P\\0')
+cp -p $S/$IT/train_state.pt $D/latest_train_state.pt
+echo $it > $D/latest_checkpointed_iteration.txt
+echo "INIT_CKPT_OK $IT from $S: $nl shard files linked, $nc files copied"
+"""
 
 
 def branch_cmd(parent, branch, step):

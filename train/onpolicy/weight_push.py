@@ -93,6 +93,15 @@ class PPWeightPusher:
             for k, dt, sh in m:
                 assert k not in owner, 'tensor %s exported by ranks %d and %d' % (k, owner[k], r)
                 owner[k], info[k] = r, (dt, sh)
+        # a router expert bias is loaded into vLLM's live storage outside the layer-completion count, so a missing or
+        # bf16 one would fail silently: every MoE gate needs its fp32 bias (models without expert bias have none)
+        for k in owner:
+            if k.endswith('.gate.weight') and k[:-len('weight')] + 'e_score_correction_bias' in owner:
+                assert info[k[:-len('weight')] + 'e_score_correction_bias'][0] == 'torch.float32', 'router expert bias not fp32: %s' % k
+        biased = [k for k in owner if k.endswith('.e_score_correction_bias')]
+        if biased:
+            gates = [k for k in owner if k.endswith('.gate.weight')]
+            assert len(biased) == len(gates), 'MoE gates %d, router expert biases %d' % (len(gates), len(biased))
         from vllm.distributed.weight_transfer.base import layerwise_groups
         self.order = [k for g in layerwise_groups(list(owner)) for k in g]
         assert set(self.order) == set(owner)
@@ -132,7 +141,11 @@ class PPWeightPusher:
         from modelopt.torch.export.unified_export_megatron import GPTModelExporter
         sd = OrderedDict()
         for chunk in self.chunks:
-            ex = GPTModelExporter(_unwrap(chunk), self.hf_path, dtype=torch.bfloat16)
+            # moe_router_dtype as the offline export (export_quantized_megatron_to_hf.py): NemotronH MoE (Nemotron 3 Nano)
+            # keeps its router expert bias (e_score_correction_bias, values ~40-66) in fp32; without it the bias went out
+            # as bf16 (steps of 0.25-0.5 there) and the bias updates (~1e-3 per step) would never reach the server
+            m = _unwrap(chunk)
+            ex = GPTModelExporter(m, self.hf_path, dtype=torch.bfloat16, moe_router_dtype=getattr(m.config, 'moe_router_dtype', None))
             for _, lsd in ex.layer_state_dicts.items():
                 for k, t in lsd.items():
                     if _skip(k):

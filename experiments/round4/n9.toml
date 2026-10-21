@@ -1,0 +1,15 @@
+# Nemotron Nano 9B v2: all five domains in one run (window 131,072), 240 steps, WSD decay over the last 40; weights
+# exported at 200, 220 and 240 (r4-n9-s200 / s220 / s240). Learning rate as NVIDIA's QAD of this model.
+include = "base_mt.toml"
+name = "r4-n9"
+model = "NVIDIA-Nemotron-Nano-9B-v2"
+checkpoint = "NVIDIA-Nemotron-Nano-9B-v2-PTQ-NVFP4-nvscale"   # built by `prepare` (train/prep/build_ptqs.py)
+subset = "mix_r4_n9_s20261021"
+window = 131072
+budgets = [240]
+decays = [40]
+keep_weights = [200, 220]
+lr = 1e-6
+min_lr = 1e-7
+val_n = 300
+expected_json = "train/configs/expected_n9.json"

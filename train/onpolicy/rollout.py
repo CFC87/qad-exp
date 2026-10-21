@@ -18,6 +18,15 @@ Per step k:
      totals, length percentiles, truncation / no-</think> / repetition rates, self log p, per dataset, times, and every
      `sample_every` steps a few decoded samples); the step's line is also served at /stats/<route>/<k> for the trainer,
      which logs it to wandb next to its own metrics.
+Offline traces: a subset row with a `response` (prompts.SubsetSource: resp_ids) is not generated; its
+response is trained as written, packed and masked exactly like a generated one (loss on the response tokens, plus the
+prompt's history spans if any), so a subset can mix written traces with prompts the student answers itself. Logged with
+finish 'offline'; its tokens count as offline_tokens, not gen_tokens, and do not move the dataset's expected length.
+cfg offline_until (U): the rows' traces are used in steps 0..U-1 only; from step U on they are
+ignored and those rows are generated like the others. Rows are drawn and packed as usual (rank order, the step's token
+target) throughout; in steps 0..U-1 a row with a trace is trained as written and a row without one is generated.
+cfg wait_init: the trainer started from a trained checkpoint (the chain's init_from) pushes those weights and reports
+step -1 done; step 0 waits for that, so the student's own rollouts are generated with the right weights from the start.
 Validation (cfg val_every, val_items): when step k with k % val_every == 0 (k > 0) starts, the fixed validation prompts
 are generated first with the same weights and published at /val/<e>/<seq> (e = k / val_every - 1), then step k's own
 rollouts; the trainer evaluates them (forward only) right after its step k - 1. Both run on vLLM at the same time.
@@ -279,6 +288,9 @@ async def run_step(k, src, feed, cfg, session, route='pack', fixed=None):
     rlog = []
     texts = []
     touched = {}  # rank -> its last event in this step: 'd' drawn from the source, 'b' given back (ledger.py)
+    if cfg.get('offline_until') is not None and fixed is None:
+        src.offline_phase(k < cfg['offline_until'])
+        stats['offline_phase'] = k < cfg['offline_until']
 
     def draw(**kw):
         it = src.next(**kw)
@@ -301,6 +313,8 @@ async def run_step(k, src, feed, cfg, session, route='pack', fixed=None):
         return (a + w * float(mtc.get('cost_prior', 8.0))) / (b + w)
 
     def est(item):  # the prompt's own prediction (length sets: exp_gen) else the dataset's running mean
+        if item.get('resp_ids') is not None:  # offline trace: exact
+            return item['n'] + len(item['resp_ids'])
         e = item.get('exp')
         n = item.get('n_est') or item['n']  # stored-cut sets: the trained sample is the conversation up to the cut
         if fixed is None:
@@ -311,6 +325,10 @@ async def run_step(k, src, feed, cfg, session, route='pack', fixed=None):
 
     async def one(item):
         nonlocal seq, done_tok
+        if item.get('resp_ids') is not None and fixed is None:  # offline trace: trained as written, no generation
+            await record_sample(item, dict(ids=item['ids'], resp=list(item['resp_ids']), finish='offline', lp=None,
+                                           hist_spans=item.get('hist_spans')))
+            return
         disp = cfg.setdefault('_dispatch', Dispatch(cfg['vllm']))
         # multi-turn config per "dataset/subset" (e.g. "SFT-Agentic-v2/interactive_agent") or per dataset; validation
         # (fixed prompts) stays single-turn so its KL compares across runs
@@ -424,11 +442,18 @@ async def run_step(k, src, feed, cfg, session, route='pack', fixed=None):
             s = Sample(o['ids'], resp, dict(dataset=item['dataset'], prompt_id=item['prompt_id'], finish=fin,
                                             rank=item.get('rank'), think_end=te, hist_spans=o.get('hist_spans')))
             done_tok += len(s)
-            stats['finished'] += 1; stats['gen_tokens'] += len(resp); stats['truncated'] += fin == 'length'
+            off = fin == 'offline'
+            stats['finished'] += 1; stats['truncated'] += fin == 'length'
+            stats['offline' if off else 'online'] = stats.get('offline' if off else 'online', 0) + 1
+            stats['offline_tokens' if off else 'gen_tokens'] = stats.get('offline_tokens' if off else 'gen_tokens', 0) + len(resp)
             stats['prompt_tokens'] += n_prompt
-            b = by_ds.setdefault(item['dataset'], dict(n=0, truncated=0, gen_tokens=0, prompt_tokens=0, no_think=0,
-                                                       rep=0.0, lp=0.0, lp_n=0))
-            b['n'] += 1; b['truncated'] += fin == 'length'; b['gen_tokens'] += len(resp); b['prompt_tokens'] += n_prompt
+            b = by_ds.setdefault(item['dataset'], dict(n=0, truncated=0, gen_tokens=0, offline=0, offline_tokens=0,
+                                                       prompt_tokens=0, no_think=0, rep=0.0, lp=0.0, lp_n=0))
+            b['n'] += 1; b['truncated'] += fin == 'length'; b['prompt_tokens'] += n_prompt
+            if off:
+                b['offline'] += 1; b['offline_tokens'] += len(resp)
+            else:
+                b['gen_tokens'] += len(resp)
             b['no_think'] += te is None; b['rep'] += rep
             if lp is not None:
                 b['lp'] += lp; b['lp_n'] += 1
@@ -440,7 +465,9 @@ async def run_step(k, src, feed, cfg, session, route='pack', fixed=None):
             if len(texts) < 64:
                 texts.append((dict(item, ids=o['ids'], n=len(o['ids'])), resp))  # multi-turn: this turn's own prompt
             if fixed is None:
-                src.update_expected(item['dataset'], len(resp)); src.record(item['dataset'], len(s))
+                if not off:  # an offline trace's length says nothing about what the student will write
+                    src.update_expected(item['dataset'], len(resp))
+                src.record(item['dataset'], len(s))
             recorded.add(item.get('rank'))
             for p in packer.add(s):
                 await feed.publish(k, seq, to_batch(p, pad_id=cfg['pad_id'], ds_names=ds_names), route); seq += 1
@@ -524,7 +551,8 @@ async def run_step(k, src, feed, cfg, session, route='pack', fixed=None):
     for d, b in by_ds.items():
         b['no_think_rate'] = b['no_think'] / max(b['n'], 1); b['rep_mean'] = b['rep'] / max(b['n'], 1)
         b['lp_mean'] = b['lp'] / b['lp_n'] if b['lp_n'] else None
-        b['trunc_rate'] = b['truncated'] / max(b['n'], 1); b['resp_mean'] = b['gen_tokens'] / max(b['n'], 1)
+        b['trunc_rate'] = b['truncated'] / max(b['n'], 1)
+        b['resp_mean'] = (b['gen_tokens'] + b['offline_tokens']) / max(b['n'], 1)
         for x in ('rep', 'lp', 'lp_n'):
             b.pop(x)
     if cfg.get('_e2e_cost'):
@@ -574,7 +602,7 @@ async def main_async(cfg, src):
     # after VLLM_HTTP_TIMEOUT_KEEP_ALIVE, default 5 s; aiohttp keeps it 15 s by default and would reuse a closed one,
     # which shows up as "Server disconnected" retries)
     conn = aiohttp.TCPConnector(limit=cfg.get('max_concurrency', 512), keepalive_timeout=cfg.get('keepalive_timeout', 4.0))
-    cum = dict(prompts=0, prompt_tokens=0, gen_tokens=0, packed_tokens=0, loss_tokens=0, dropped_tokens=0)
+    cum = dict(prompts=0, prompt_tokens=0, gen_tokens=0, offline_tokens=0, packed_tokens=0, loss_tokens=0, dropped_tokens=0)
     if cfg.get('start_step', 0) > 0:  # resume / branch: carry the totals on (the latest attempt of step start - 1)
         c0 = ledger.carried_totals(cfg['log_dir'], cfg['start_step'])
         if c0:
@@ -612,8 +640,8 @@ async def main_async(cfg, src):
         n_val = (cfg['start_step'] - 1) // val_every if (val_every and cfg['start_step'] > 0) else 0  # batches served
         k = cfg['start_step']
         while k < cfg['steps']:
-            if k > 0:  # on resume too: the trainer pushes the resumed weights and reports step start_step - 1 done
-                await feed.wait_done(k - 1)
+            if k > 0 or cfg.get('wait_init'):  # on resume too: the trainer pushes the resumed weights and reports step
+                await feed.wait_done(k - 1)    # start_step - 1 done; started from a trained checkpoint: step -1
             feed.status = dict(step=k, state='generating', since=time.time())
             vj = None
             if val_every and val_items and k > 0 and k % val_every == 0 and k == cfg['start_step']:
@@ -624,6 +652,7 @@ async def main_async(cfg, src):
                 await asyncio.sleep(0)
             st = await run_step(k, src, feed, cfg, session)
             cum['prompts'] += st['finished']; cum['prompt_tokens'] += st['prompt_tokens']; cum['gen_tokens'] += st['gen_tokens']
+            cum['offline_tokens'] += st.get('offline_tokens', 0)
             cum['packed_tokens'] += st['packed_tokens']; cum['loss_tokens'] += st['loss_tokens']
             cum['dropped_tokens'] += st['dropped_tokens']
             st['cumulative'] = dict(cum, subset_share=(getattr(src, 'handed', 0) / total_prompts) if total_prompts else None)
@@ -632,8 +661,9 @@ async def main_async(cfg, src):
                 await vj
             feed.status = dict(step=k, state='waiting for trainer', since=time.time(),
                                last={x: st[x] for x in ('fill', 'dropped_samples', 'seconds', 'truncated', 'finished')})
-            print('step %d: fill %.3f, dropped %d samples, %d s, truncated %d/%d, generated %d tok (cum %.3fB, %s)' % (
+            print('step %d: fill %.3f, dropped %d samples, %d s, truncated %d/%d, generated %d tok, offline %d (cum %.3fB, %s)' % (
                 k, st['fill'], st['dropped_samples'], st['seconds'], st['truncated'], st['finished'], st['gen_tokens'],
+                st.get('offline_tokens', 0),
                 (cum['packed_tokens']) / 1e9, 'subset %.1f%%' % (100 * st['cumulative']['subset_share'])
                 if st['cumulative']['subset_share'] is not None else ''), flush=True)
             if st.get('data_exhausted'):
@@ -682,6 +712,8 @@ def main():
         from prompts import SubsetSource
         src = SubsetSource(cfg['subset'], tok_dir, ranks=tuple(cfg['train_ranks']),
                            expected_response=cfg.get('expected_response'), **rkw)
+        if cfg.get('offline_until') is not None:
+            print('offline traces until step %d: %d rows with a trace' % (cfg['offline_until'], int(src.offline.sum())), flush=True)
         start = cfg.get('start_step', 0)
         if start:  # resume / branch: skip the prompts earlier steps used (ledger.py: the latest attempt of each step,
             used = ledger.used_ranks(cfg['log_dir'], start)  # minus the prompts a step gave back)
@@ -712,6 +744,10 @@ def main():
     cfg['_think_end'] = make_think_end(tok)
     cfg['_tok'] = tok  # multi-turn episodes render each turn with the model's own template (multiturn.py)
     cfg['_fam'] = getattr(src, 'fam', 'qwen3')  # and parse it as that model's eval parsers do
+    if cfg['_fam'] in MT.TOOLS_PARSERS and cfg.get('multiturn'):  # Nemotron 3 Nano: vLLM 0.29's parser as a service
+        MT.PARSE_URL = cfg.get('parse_url') or 'http://127.0.0.1:8295'
+        import requests
+        assert requests.get(MT.PARSE_URL + '/health', timeout=10).ok, 'parse service %s not up' % MT.PARSE_URL
     load_cards(cfg)
     if cfg.get('pad_id') is None:
         cfg['pad_id'] = tok.pad_token_id if tok.pad_token_id is not None else tok.eos_token_id

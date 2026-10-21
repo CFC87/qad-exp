@@ -41,6 +41,17 @@ contexts, on-policy training).
 16. CL_MOCK_VOCAB=N limits mock-data token ids to 1..N (tests on models with untrained embedding rows, Nano V2).
 17. Mamba2 models: the fused training kernel gets contiguous inputs (mamba_compact.py; 32-bit offset overflow past
    ~52K tokens per micro-batch otherwise). CL_MAMBA_COMPACT=0 disables it.
+18. CL_PRETRAINED=<checkpoint dir> starts a new run from a trained checkpoint (weights only; step 0, new optimizer).
+19. NemotronH MoE (Nemotron 3 Nano) with CL_IMPORT_INPUT_SCALE: the routed experts' one input quantizer <- the 128
+   experts' input_scale (all equal in the checkpoint), their 128 weight quantizers <- the checkpoint's weight_scale_2
+   (amax = weight_scale_2 * 6 * 448; NVIDIA's one shared value per layer and projection, max over the experts -- a
+   quantize.py PTQ calibrates every expert on its own max|W_e|), shared experts as dense MLPs. The loaded amax is kept
+   by ModelOpt's restore (no re-calibration), so resumes and exports carry it.
+20. CL_MOE_PAD_ID=<token id>: MoE models get padding_mask = (tokens == id) in their forward, so the pack padding (the
+   rollout's pad id) neither counts for the router expert-bias update nor enters the auxiliary load-balancing loss
+   (Megatron-Bridge passes no padding_mask; the packs' padding tails and empty packs would otherwise drive the bias of
+   the experts the pad token routes to). With pad = eos (Nemotron 3 Nano: <|im_end|>, 11) the real end-of-turn tokens
+   are left out as well (~0.1 % of the tokens), which only touches the routing statistics.
 
 Usage: same arguments as distill.py, run from examples/megatron_bridge (the container's working directory).
 """
@@ -58,6 +69,32 @@ def _from_iterator_with_positions(data_iterator, include_mtp_inputs=False, *args
 
 
 gpt_step.get_batch_from_iterator = _from_iterator_with_positions
+
+_MOE_PAD = os.environ.get("CL_MOE_PAD_ID")
+if _MOE_PAD:  # 20.: pack padding out of the MoE router statistics
+    import inspect as _inspect
+    _MOE_PAD = int(_MOE_PAD)
+
+    def _with_padding_mask(cls):
+        orig = cls.forward
+        assert "padding_mask" in _inspect.signature(orig).parameters, "%s.forward takes no padding_mask" % cls.__name__
+
+        def forward(self, *args, **kwargs):
+            if kwargs.get("padding_mask") is None and getattr(self.config, "num_moe_experts", None):
+                ids = kwargs.get("input_ids", args[0] if args else None)
+                if ids is not None:
+                    kwargs["padding_mask"] = ids.eq(_MOE_PAD)
+            return orig(self, *args, **kwargs)
+
+        cls.forward = forward
+
+    from megatron.core.models.gpt.gpt_model import GPTModel as _GPTModel
+    _with_padding_mask(_GPTModel)
+    try:
+        from megatron.core.models.hybrid.hybrid_model import HybridModel as _HybridModel
+        _with_padding_mask(_HybridModel)
+    except ImportError:
+        pass
 gpt_step._middle_pp_stage_needs_batch = lambda cfg: True  # middle stages consume the batch too
 
 _overrides = json.loads(os.environ.get("CL_PROVIDER_OVERRIDES", "{}") or "{}")
@@ -195,6 +232,24 @@ if _SCHED:
 
     _bdistill_sched.pretrain = _pretrain_with_sched
     print("qad_distill: scheduler overrides %s" % _SCHED, flush=True)
+
+_PRETRAINED = os.environ.get("CL_PRETRAINED")
+if _PRETRAINED:
+    # Start from a trained checkpoint (the chain's init_from): Megatron-Bridge's pretrained_checkpoint
+    # path. When the run's own checkpoint directory holds nothing to resume, the model weights (and quantizer state) are
+    # read from this directory's latest iteration with finetune semantics: step 0, a new optimizer and schedule, no RNG
+    # state. The student is still built and restored from --student_megatron_path first (structure + ModelOpt state);
+    # these weights then replace its weights. A resume of the run itself prefers its own checkpoints.
+    import megatron.bridge.training.distill as _bdistill_pre
+
+    _orig_pretrain_pre = _bdistill_pre.pretrain
+
+    def _pretrain_with_pre(config, forward_step_func, *a, **k):
+        config.checkpoint.pretrained_checkpoint = _PRETRAINED
+        return _orig_pretrain_pre(config, forward_step_func, *a, **k)
+
+    _bdistill_pre.pretrain = _pretrain_with_pre
+    print("qad_distill: start from the trained checkpoint %s (finetune: step 0, new optimizer)" % _PRETRAINED, flush=True)
 
 _DDP = json.loads(os.environ.get("CL_DDP_OVERRIDES", "{}") or "{}")
 if _DDP:
@@ -463,14 +518,19 @@ if _FEED:
         wl = context.state.wandb_logger
         if wl is None:
             return
-        wl.log(_wk.wandb_view(m, split, lr=lr, grad_norm=None if gn is None else float(gn)), step=it)  # sections: wandb_keys.py
-        hist = st.get("resp_len_hist")
-        if hist:
-            wl.log({("rollout" if split == "train" else "val_rollout") + "/response_len_histogram": wl.Histogram(hist)}, step=it)
-        if st.get("samples"):
-            cols = ["dataset", "prompt_id", "prompt_tokens", "response_tokens", "prompt_tail", "response"]
-            wl.log({("rollout" if split == "train" else "val_rollout") + "/sample_responses":
-                    wl.Table(columns=cols, data=[[x[c] for c in cols] for x in st["samples"]])}, step=it)
+        # wandb only mirrors metrics.jsonl (written above): a wandb failure (e.g. a timed-out artifact upload of the samples
+        # table) must not end the run
+        try:
+            wl.log(_wk.wandb_view(m, split, lr=lr, grad_norm=None if gn is None else float(gn)), step=it)  # sections: wandb_keys.py
+            hist = st.get("resp_len_hist")
+            if hist:
+                wl.log({("rollout" if split == "train" else "val_rollout") + "/response_len_histogram": wl.Histogram(hist)}, step=it)
+            if st.get("samples"):
+                cols = ["dataset", "prompt_id", "prompt_tokens", "response_tokens", "prompt_tail", "response"]
+                wl.log({("rollout" if split == "train" else "val_rollout") + "/sample_responses":
+                        wl.Table(columns=cols, data=[[x[c] for c in cols] for x in st["samples"]])}, step=it)
+        except Exception as e:
+            print("qad_distill: wandb log failed at %s step %d (%r); the step is in metrics.jsonl" % (split, it, e), flush=True)
 
     class _StepDone(Callback):
         pusher = None
@@ -509,6 +569,15 @@ if _FEED:
                                              buffer_gb=float(os.environ.get("CL_WEIGHT_PUSH_BUFFER_GB", "2")),
                                              log=lambda m: print("qad_distill: " + m, flush=True))
             step = context.state.train_state.step
+            if step == 0 and _PRETRAINED and not getattr(context.state.cfg.train, "skip_train", False):
+                # started from a trained checkpoint: vLLM serves the PTQ weights, so push these and report step -1 done,
+                # which is what the controller (cfg wait_init) waits for before generating step 0
+                if self.pusher is not None:
+                    self.pusher.push()
+                torch.distributed.barrier()
+                if torch.distributed.get_rank() == 0:
+                    post_step_done(_FEED, -1)
+                print("qad_distill: started from %s, weights pushed before step 0" % _PRETRAINED, flush=True)
             if step > 0 and not getattr(context.state.cfg.train, "skip_train", False):
                 # resumed from a checkpoint: vLLM still serves the starting weights, so push the resumed ones and
                 # report step - 1 done, which is what lets the controller start generating step `step`
@@ -570,19 +639,30 @@ if _IMPORT:
                          "self_attention.linear_qkv": ["mixer.q_proj", "mixer.k_proj", "mixer.v_proj"],
                          "self_attention.linear_proj": ["mixer.o_proj"]}
 
+    # NemotronH MoE (Nemotron 3 Nano): routed experts are TEGroupedMLP (one input quantizer, one weight quantizer per
+    # expert: weight_quantizer[e]), shared experts a dense MLP; HF mixer.experts.<e>.up_proj / down_proj (relu2, no gate)
+    _MOE_EXPERTS = {"mlp.experts.linear_fc1": "mixer.experts.%d.up_proj", "mlp.experts.linear_fc2": "mixer.experts.%d.down_proj"}
+
     def _layer_map(ckpt):  # (HF layer root, {Megatron submodule: [HF modules sharing its input_scale]}, strict)
-        if json.load(open(os.path.join(ckpt, "config.json"))).get("model_type") == "nemotron_h":
-            return "backbone.layers", _HF_OF_NEMOTRON_H, True
+        cfg = json.load(open(os.path.join(ckpt, "config.json")))
+        if cfg.get("model_type") == "nemotron_h":
+            m = dict(_HF_OF_NEMOTRON_H)
+            n_exp = int(cfg.get("n_routed_experts") or 0)
+            if n_exp:
+                m.update({rel: [hf % e for e in range(n_exp)] for rel, hf in _MOE_EXPERTS.items()})
+                m.update({"mlp.shared_experts.linear_fc1": ["mixer.shared_experts.up_proj"],
+                          "mlp.shared_experts.linear_fc2": ["mixer.shared_experts.down_proj"]})
+            return "backbone.layers", m, True
         return "model.layers", _HF_OF, False  # dense Qwen3, unchanged
 
-    def _read_input_scales(path):
+    def _read_input_scales(path, suffix=".input_scale"):
         from safetensors import safe_open
         out = {}
         for f in sorted(_glob.glob(os.path.join(path, "*.safetensors"))):
             with safe_open(f, "pt") as st:
                 for k in st.keys():
-                    if k.endswith(".input_scale"):
-                        out[k[: -len(".input_scale")]] = float(st.get_tensor(k).float().item())
+                    if k.endswith(suffix):
+                        out[k[: -len(suffix)]] = float(st.get_tensor(k).float().item())
         return out
 
     class _ImportScales(_Cb):
@@ -604,7 +684,9 @@ if _IMPORT:
                 pass
             root, hf_of, strict = _layer_map(_IMPORT)
             scales = _read_input_scales(_IMPORT)
+            ws2 = _read_input_scales(_IMPORT, ".weight_scale_2") if any(r in hf_of for r in _MOE_EXPERTS) else {}
             n_set, missing, used, mine = 0, [], set(), set()
+            n_w, w_missing = 0, []
             for chunk in context.model:
                 for layer in chunk.modules():
                     if not isinstance(layer, kinds):
@@ -630,14 +712,29 @@ if _IMPORT:
                         q.amax = amax
                         used.update(keys)
                         n_set += 1
+                        if rel in _MOE_EXPERTS:  # routed experts: every expert's weight amax <- the shared weight_scale_2
+                            wv = [ws2.get(k) for k in keys]
+                            wq = getattr(mod, "weight_quantizer", None)
+                            if any(v is None for v in wv) or len(set(wv)) != 1 or wq is None or len(wq) != len(keys):
+                                w_missing.append((i, rel, len(set(wv)), None if wq is None else len(wq))); continue
+                            for e in range(len(keys)):
+                                qe = wq[e]
+                                qe = qe[0] if hasattr(qe, "__getitem__") and not hasattr(qe, "amax") else qe  # SequentialQuantizer
+                                qe.amax = torch.tensor(wv[0] * 6.0 * 448.0, dtype=torch.float32,
+                                                       device=qe.amax.device if getattr(qe, "amax", None) is not None else "cuda")
+                                n_w += 1
             # input_scales of this stage's layers that no enabled quantizer took: the checkpoint quantizes a module
             # that is BF16 here (a wrong recipe or a wrong enable state after a pipeline re-split)
             unused = sorted(k for k in scales if int(k.split(".")[2]) in mine and k not in used)
-            print("qad_distill: imported %d activation scales from %s%s%s" % (
+            print("qad_distill: imported %d activation scales from %s%s%s%s" % (
                 n_set, _IMPORT, (", NOT FOUND or unequal: %s" % missing[:4]) if missing else "",
-                (", %d input_scales of this stage unused: %s" % (len(unused), unused[:4])) if unused else ""), flush=True)
+                (", %d input_scales of this stage unused: %s" % (len(unused), unused[:4])) if unused else "",
+                (", %d routed-expert weight scales (weight_scale_2)%s" % (n_w, (", NOT FOUND or unequal: %s" % w_missing[:4])
+                                                                            if w_missing else "")) if ws2 else ""), flush=True)
             if missing:
                 raise RuntimeError("CL_IMPORT_INPUT_SCALE: %d quantizers without a matching input_scale" % len(missing))
+            if w_missing:
+                raise RuntimeError("CL_IMPORT_INPUT_SCALE: %d routed-expert projections without one shared weight_scale_2" % len(w_missing))
             if unused and strict:
                 raise RuntimeError("CL_IMPORT_INPUT_SCALE: %d input_scales of quantized modules have no enabled "
                                    "quantizer here" % len(unused))

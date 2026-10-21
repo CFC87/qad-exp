@@ -1,0 +1,41 @@
+# Megatron-Core PTQ/QAD recipe for Nemotron Nano 9B V2 that mirrors the PTQ checkpoint the QAD starts from and the rollout
+# servers load (a ModelOpt PTQ of the BF16 model with NVIDIA's release layer map and NVIDIA's static scales):
+#   Mamba in_proj / out_proj (all but layers 0, 54), MLP up / down (all but layers 1, 55)   NVFP4 W4A4 (block 16)
+#   attention q/k/v/o (layers 14, 21, 30, 39), layers 0, 1, 54, 55, conv1d, norms,          BF16
+#   embeddings, output layer
+#   KV cache                                                                                  BF16 (no FP8 cast of Q/K/V)
+# 96 linears quantized (checkpoint: 96 input_scale / weight_scale_2). Megatron names: one layer per pattern character, so
+# layer N here is layer N of the HF checkpoint; MambaLayer mixer.in_proj / out_proj, MLPLayer mlp.linear_fc1 (= up_proj,
+# relu2, no gate) / linear_fc2, attention self_attention.*; conv1d is a raw parameter in MCore 0.19.1 (no quantizer).
+# Layer-indexed selectors: run quantize.py with --pp_size 1 (global layer numbers); at other PP sizes the quantizer
+# enable state comes from the checkpoint's extra_state, and qad_distill's CL_IMPORT_INPUT_SCALE checks it against the HF
+# checkpoint (every HF input_scale of a stage's layers must land on an enabled quantizer).
+# modelopt-schema: modelopt.recipe.config.ModelOptPTQRecipe
+
+imports:
+  base_disable_all: configs/ptq/units/base_disable_all
+  default_disabled_quantizers: configs/ptq/units/default_disabled_quantizers
+  w4a4_nvfp4_nvfp4: configs/ptq/units/w4a4_nvfp4_nvfp4
+
+metadata:
+  recipe_type: ptq
+  description: >-
+    Nemotron Nano 9B V2, NVIDIA release layer map: NVFP4 W4A4 on Mamba in_proj / out_proj and MLP linear_fc1 / fc2
+    except layers 0, 1, 54, 55; attention, embeddings, output layer in BF16; KV cache BF16.
+
+quantize:
+  algorithm: max
+  quant_cfg:
+    - $import: base_disable_all
+    - $import: w4a4_nvfp4_nvfp4
+    - quantizer_name: '*decoder.layers.0.mixer.*'
+      enable: false
+    - quantizer_name: '*decoder.layers.54.mixer.*'
+      enable: false
+    - quantizer_name: '*decoder.layers.1.mlp.*'
+      enable: false
+    - quantizer_name: '*decoder.layers.55.mlp.*'
+      enable: false
+    - quantizer_name: '*self_attention.*'
+      enable: false
+    - $import: default_disabled_quantizers

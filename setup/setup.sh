@@ -121,7 +121,7 @@ if has data; then
 import hashlib, os, tempfile, tomllib, urllib.request
 from pathlib import Path
 m = tomllib.load(open("data/MANIFEST.toml", "rb"))
-base = f"https://github.com/{m['repo']}/releases/download/{m['release']}"
+base = lambda a: f"https://github.com/{m['repo']}/releases/download/{a.get('release', m['release'])}"
 def sha(p):
     h = hashlib.sha256()
     with open(p, "rb") as f:
@@ -134,7 +134,7 @@ for name, a in m["assets"].items():
         print(f"ok      {dst}"); continue
     dst.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=dst.parent, suffix=".part"); os.close(fd)
-    urllib.request.urlretrieve(f"{base}/{name}", tmp)
+    urllib.request.urlretrieve(f"{base(a)}/{name}", tmp)
     if sha(tmp) != a["sha256"]:
         os.unlink(tmp); raise SystemExit(f"sha256 mismatch for {name}")
     os.replace(tmp, dst)
