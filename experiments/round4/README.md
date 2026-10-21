@@ -66,6 +66,15 @@ Three nodes, one model each, all with `--layout 1node`. Run every command from t
 node does its own setup, preparation, step-0 check, smoke run, training and evaluation; the nodes do not depend on each
 other.
 
+**Before pulling this version**, on a node that already has a clone (for example from `experiments/pairs-r2`):
+- Pull only when no chain is running on that node. A pull in the middle of a chain mixes two versions of the code in
+  one run.
+- `git status` must show no local changes. If `train/launch/chain.py` or another file was changed locally, `git stash`
+  before `git pull` and do not re-apply the change.
+  - For example, a local fix to the removal of old saves while a chain trains. That removal stopped a chain's first
+    segment after its first save. This version fixes it.
+  - `git stash list` keeps the old change for reference.
+
 **On every node first** (after the general setup of `README.md`):
 
 ```bash
@@ -80,9 +89,9 @@ E=experiments/round4
 ```bash
 python3 train/launch/chain.py $E/q30_stage1.toml prepare        # the PTQ student (one GPU)
 python3 train/launch/chain.py $E/q30_stage1.toml check-step0    # GPUs 0-3; read out/check-step0.txt (pass criteria below)
-python3 train/launch/chain.py $E/smoke_q30.toml run --layout 1node        # stage-1 path, 2 steps
-python3 train/launch/chain.py $E/smoke_q30_long.toml run --layout 1node   # stage-2 path (from the smoke's step 2, YaRN), 2 steps
-python3 train/launch/chain.py $E/smoke_q30_long.toml clean && python3 train/launch/chain.py $E/smoke_q30.toml clean
+python3 train/launch/chain.py $E/smoke_q30.toml run --layout 1node        # stage-1 path, 2 steps; then the smoke checks below
+python3 train/launch/chain.py $E/smoke_q30_long.toml run --layout 1node   # stage-2 path (from the smoke's step 2, YaRN), 2 steps; smoke checks
+python3 train/launch/chain.py $E/smoke_q30_long.toml clean && python3 train/launch/chain.py $E/smoke_q30.toml clean   # after both passed
 python3 train/launch/chain.py $E/q30_stage1.toml run --layout 1node   # 180 steps: exports r4-q30-s150, -s160, -s180
 python3 train/launch/chain.py $E/q30_stage2.toml run --layout 1node   # 60 steps from stage 1's step 180: r4-q30-s210, -s240
 ```
@@ -92,7 +101,8 @@ python3 train/launch/chain.py $E/q30_stage2.toml run --layout 1node   # 60 steps
 ```bash
 python3 train/launch/chain.py $E/n9.toml prepare                # start checkpoint (CPU, a few minutes; must log "629 / 629 tensors match"), PTQ student
 python3 train/launch/chain.py $E/n9.toml check-step0            # one GPU
-python3 train/launch/chain.py $E/smoke_n9.toml run --layout 1node && python3 train/launch/chain.py $E/smoke_n9.toml clean
+python3 train/launch/chain.py $E/smoke_n9.toml run --layout 1node   # 2 steps; then the smoke checks below
+python3 train/launch/chain.py $E/smoke_n9.toml clean                 # after the checks passed
 python3 train/launch/chain.py $E/n9.toml run --layout 1node     # 240 steps: exports r4-n9-s200, -s220, -s240
 ```
 
@@ -101,7 +111,8 @@ python3 train/launch/chain.py $E/n9.toml run --layout 1node     # 240 steps: exp
 ```bash
 python3 train/launch/chain.py $E/n3.toml prepare                # start checkpoint (CPU, up to about 1.5 h on few cores; "24147 / 24147 tensors match"), PTQ student
 python3 train/launch/chain.py $E/n3.toml check-step0            # GPUs 0-3
-python3 train/launch/chain.py $E/smoke_n3.toml run --layout 1node && python3 train/launch/chain.py $E/smoke_n3.toml clean
+python3 train/launch/chain.py $E/smoke_n3.toml run --layout 1node   # 2 steps; then the smoke checks below
+python3 train/launch/chain.py $E/smoke_n3.toml clean                 # after the checks passed
 python3 train/launch/chain.py $E/n3.toml run --layout 1node     # 240 steps: exports r4-n3-s200, -s220, -s240
 ```
 
@@ -118,10 +129,102 @@ identical, except:
 
 Anything else: stop and report.
 
-**Smoke run, what to check** (2 steps; not a result): `SEGMENT_DONE` and `EXPORTED` in `out/<smoke name>.chain.log`;
-`weight push` lines in `out/runs/<segment>/trainer.log` (the trainer's whole log, saved when the segment ends); for
-Nemotron 3 Nano `parse service up` in the chain log; no `CHAIN_STOP`. An out-of-memory error in the trainer on a 30B-class model: stop and report (the CPU offload
-fraction is the knob; do not change it yourself).
+**Smoke runs, what to check.** Everything in this experiment was tested before release except what needs the GPUs:
+training on GPUs 0-3 with four rollout servers on GPUs 4-7; memory (the 30B-class models keep half of the optimizer
+state in CPU memory; stage 2 of Qwen3-30B-A3B trains at 131,072 tokens with YaRN); the weight push into the servers
+after each step; the customer-service episodes (for Nemotron 3 Nano through the parse service); and the time per step.
+A smoke run tests these in 2 steps of the real list. Its numbers are not results. Do all five checks before `clean`,
+which removes `out/train/<segment>` and with it `metrics.jsonl`. In the commands, `N` is the smoke's name and `S` its
+segment:
+
+| Config | `N` | `S` |
+|---|---|---|
+| `smoke_q30.toml` | `smoke-r4-q30` | `smoke-r4-q30-s002` |
+| `smoke_q30_long.toml` | `smoke-r4-q30-long` | `smoke-r4-q30-long-s002` |
+| `smoke_n9.toml` | `smoke-r4-n9` | `smoke-r4-n9-s002` |
+| `smoke_n3.toml` | `smoke-r4-n3` | `smoke-r4-n3-s002` |
+
+While a smoke runs, log memory every 30 s from a second terminal, and stop it with Ctrl-C when the smoke has ended
+(columns: time, host memory available in GB, memory used on GPUs 0-3 in MiB):
+
+```bash
+N=smoke-r4-n3   # this node's smoke
+while sleep 30; do echo "$(date +%T) $(free -g | awk '/^Mem:/{print $7}') $(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | head -4 | tr '\n' ' ')"; done > out/$N.mem.log
+```
+
+After it ends (`N=...; S=...` as in the table):
+
+1. **Finished.**
+
+   ```bash
+   grep -E "SEGMENT_DONE|EXPORTED|CHAIN_STOP|parse service" out/$N.chain.log
+   ```
+
+   Pass: `SEGMENT_DONE` and `EXPORTED`, no `CHAIN_STOP`. Nemotron 3 Nano: also `parse service up`, and no
+   `parse service not answering`.
+
+2. **Memory.**
+
+   ```bash
+   awk 'NR==1||$2<h{h=$2} {for(i=3;i<=6;i++) if($i>g) g=$i} END{print "host available min " h " GB; GPUs 0-3 max " g " MiB"}' out/$N.mem.log
+   grep -ciE "out of memory" out/runs/$S/trainer.log           # the count must be 0
+   grep -m2 "offload optimizer step" out/runs/$S/trainer.log   # 30B-class models: these lines must be there
+   ```
+
+   Pass: no out-of-memory error. The 30B-class models also print `offload optimizer step` lines (half of the
+   optimizer state in CPU memory). Report before starting the run if a training GPU went above 178,000 MiB (within
+   5 GB of the 183,359 MiB total) or the host had less than 20 GB available at any point. An out-of-memory error: stop
+   and report. The CPU offload fraction is the knob; do not change it yourself.
+
+3. **Weight push.**
+
+   ```bash
+   grep -c "weight push: export" out/runs/$S/trainer.log
+   python3 -c "import json,sys; [print(r['step'], r['split'], *('%s %.4f' % (f, r.get('kd/%s/all/%s' % (r['split'], f), float('nan'))) for f in ('kl', 'top1', 'nll_s'))) for r in map(json.loads, open(sys.argv[1]))]" out/train/$S/metrics.jsonl
+   ```
+
+   Step 1 trains on rollouts of the checkpoint the servers loaded from disk; step 2 trains on rollouts of the weights
+   the trainer pushed after step 1. Two steps barely move the model: from one step to the next these values change by
+   about 5-10 %. A larger jump means the servers do not hold the trainer's weights.
+
+   Pass: at least one push line per step, and in the `train` rows, step 2 against step 1:
+   - `kl` and `nll_s` at most 1.5 times step 1's;
+   - `top1` at most 0.02 lower.
+
+   `smoke_q30_long` is different: every one of its rollouts comes after a push, with YaRN. Compare it with step 1 of
+   `smoke_q30` instead: `kl` and `nll_s` at most twice as large, `top1` at most 0.05 lower.
+
+4. **Customer-service episodes** (not for `smoke_q30_long`, which has none).
+
+   ```bash
+   python3 -c "import json,sys,collections; print(collections.Counter(str(json.loads(l)['ended'])[:40] for l in open(sys.argv[1])).most_common())" out/runs/$S/episodes.jsonl
+   ```
+
+   Pass: most episodes end `complete` or `transfer...`. A reference run had about 1.5 % `stopped: unparsable or empty
+   reply`, and a few `dropped: env error` are simulator API errors.
+
+   Stop and report if more than a quarter end `stopped: unparsable or empty reply` or `dropped: ...`. For Nemotron 3
+   Nano, `dropped: generation error` means the parse service failed: send `docker logs qadx-parse` too.
+
+5. **Time per step.**
+
+   ```bash
+   python3 -c "import json,sys; t=[r['started'] for r in map(json.loads, open(sys.argv[1])) if r.get('route') == 'pack']; print(' '.join('%.1f min' % ((b - a) / 60) for a, b in zip(t, t[1:])))" out/runs/$S/steps.jsonl
+   ```
+
+   This is the time from step 0's rollouts to step 1's: generation, one training step and the push. Report it. The run
+   takes about its number of steps times this; the first step is a little slower.
+
+Send the output of the five checks for every smoke run, also when all pass.
+
+**Reminders.**
+- Run one chain at a time per node. Evaluate a model only after its chains are done.
+- The smoke runs need the simulator API variables too (all except `smoke_q30_long.toml`).
+- Nemotron 3 Nano: the launcher starts and stops the parse service container `qadx-parse` (port 8295). It restarts the
+  service by itself if it stops answering. Do not stop it by hand while a chain runs.
+- If anything does not match this README (the step-0 check, a smoke check, a `CHAIN_STOP`), stop and report. Send
+  `out/<name>.chain.log`, `out/runs/<segment>/trainer.log` and `reports/env_report.md`. Do not change settings, code
+  or versions to get past it (`CLAUDE.md`, rules 3 and 6).
 
 **Disk.** `clean` a chain once its exports exist. Qwen3-30B-A3B: run `clean` of `q30_stage1.toml` only after stage 2
 has started (stage 2 lays out its start from stage 1's step-180 checkpoint when it launches; a restart of stage 2 still
@@ -154,5 +257,6 @@ A registered name such as `r4-n9-s200` means `out/exports/r4-n9-s200`. Phases, t
 
 For each model: the **Report** for its exported arms (`.venv-client/bin/python eval/lib/summary.py --arms
 r4-n9-s200,r4-n9-s220,r4-n9-s240 --report`, likewise for the other models; every row as printed), whether
-each chain finished (`CHAIN_DONE` in `out/<name>.chain.log`), `out/check-step0.txt` per model, the τ² API-error counts per
-arm and domain, and any deviation from this README.
+each chain finished (`CHAIN_DONE` in `out/<name>.chain.log`), `out/check-step0.txt` per model, the output of the five
+smoke checks of each smoke run, the τ² API-error counts per arm and domain, and any deviation from this README.
+Some reference gaps are small (`eval/README.md`, "What to report"); a recovery there is read with the scores next to it.
