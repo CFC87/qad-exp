@@ -133,11 +133,26 @@ starting anything. What a run leaves behind and how to resume a stopped segment 
 
 ## Evaluation
 
-Each model is evaluated with the settings of its own reference PTQ and BF16 results, so the recovery of each category is
-read against them: see `eval/README.md` for the per-model settings and commands.
+On the same node, after its chains are done (the training's GPUs and servers must be free). Each model is evaluated with
+the settings of its own reference PTQ and BF16 results, so each category's recovery is read against them; the reference
+checkpoints are not run (their scores are in `eval/reference/baselines.json`). Setup: `eval/README.md`, "Requirements"
+(gated sets via `HF_TOKEN`, the tau2 API: **gpt-5.2** as the customer and judge, not the training's simulator model):
+
+```bash
+export QADX_API_BASE=... QADX_API_KEY=... [QADX_API_KEY_2=...]   # tau2: an endpoint serving gpt-5.2 (eval/README.md)
+# dry run first (plan, serve commands, first requests; starts nothing), then the run; one model per node:
+.venv-client/bin/python eval/run.py --arm r4-q30-s150 --arm r4-q30-s160 --arm r4-q30-s180 --arm r4-q30-s210 --arm r4-q30-s240 --dry-run
+nohup .venv-client/bin/python eval/run.py --arm r4-q30-s150 --arm r4-q30-s160 --arm r4-q30-s180 --arm r4-q30-s210 --arm r4-q30-s240 > eval-r4-q30.log 2>&1 &
+nohup .venv-client/bin/python eval/run.py --arm r4-n9-s200 --arm r4-n9-s220 --arm r4-n9-s240 > eval-r4-n9.log 2>&1 &   # node B
+nohup .venv-client/bin/python eval/run.py --arm r4-n3-s200 --arm r4-n3-s220 --arm r4-n3-s240 > eval-r4-n3.log 2>&1 &   # node C
+```
+
+A registered name such as `r4-n9-s200` means `out/exports/r4-n9-s200`. Phases, times, the second API key and reruns:
+`eval/README.md`, "Other models" and "Running the round-4 exports".
 
 ## What to report
 
-For each model: the **Report** section of `eval/results/summary.md` for its exported arms (every row as printed), whether
+For each model: the **Report** for its exported arms (`.venv-client/bin/python eval/lib/summary.py --arms
+r4-n9-s200,r4-n9-s220,r4-n9-s240 --report`, likewise for the other models; every row as printed), whether
 each chain finished (`CHAIN_DONE` in `out/<name>.chain.log`), `out/check-step0.txt` per model, the τ² API-error counts per
 arm and domain, and any deviation from this README.
