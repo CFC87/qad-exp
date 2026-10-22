@@ -74,6 +74,14 @@ other.
   - For example, a local fix to the removal of old saves while a chain trains. That removal stopped a chain's first
     segment after its first save. This version fixes it.
   - `git stash list` keeps the old change for reference.
+- If you ran `check-step0` with an earlier version, run it again after pulling (Qwen3-30B-A3B and Nemotron 3 Nano):
+  - Nemotron 3 Nano: the export lost the routed experts' weight amax for all experts but the first of each layer (the
+    restore of a grouped linear gives only expert 0 an amax buffer), so it derived their `weight_scale_2` from each
+    expert's own max|W| instead of the shared scale the student trains with. Exports now go through
+    `train/export_hf.py`, which loads them from the checkpoint. Training itself was not affected: every launch imports
+    the shared scales again at train start.
+  - Qwen3-30B-A3B: the comparison now accepts last-bit rounding differences (pass criteria below); the earlier
+    criteria expected bitwise equality, which this release cannot meet.
 
 **On every node first** (after the general setup of `README.md`):
 
@@ -119,19 +127,27 @@ python3 train/launch/chain.py $E/n3.toml run --layout 1node     # 240 steps: exp
 Run long commands with `nohup ... &` or in `tmux` and follow `out/<name>.chain.log`.
 
 **Step-0 check, pass criteria** (`out/check-step0.txt`). A is the student exported at step 0, B the start checkpoint.
-The file has one line per tensor kind (`<kind> N tensors, M bitwise equal`, then the worst tensor if any differs) and
-two lines `only in A: <count> (<count per kind>) [first 5 names]` and `only in B: ...`. Pass:
-- every kind line has M = N, with one exception: Qwen3-30B-A3B's `input_scale` line must read
-  `input_scale 18624 tensors, 12529 bitwise equal`, and its worst tensor must be a routed expert's
-  `mlp.experts.<n>.down_proj.input_scale`. The release calibrated those 6,144 scales per expert; vLLM's NVFP4 MoE
-  kernels serve one activation scale per layer and projection, the largest of the experts', so the student's experts
-  all take that largest value at train start, and 6,095 of them differ from the release;
-- Nemotron 3 Nano: the `weight` line counts the router gates as "equal in value, other dtype" (exported in fp32,
-  stored in bf16); they are part of M;
+The file has one line per tensor kind (`<kind> N tensors, M bitwise equal`; when some differ, how much: the largest
+relative difference of a scale, the share of differing FP8 block scales or FP4 values, and the worst tensor), two lines
+`only in A: <count> (<count per kind>) [first 5 names]` and `only in B: ...`, and a last line `VERDICT PASS (...)` or
+`VERDICT FAIL (...)` with the reasons. Pass = `VERDICT PASS`. What it checks:
+- Qwen3-8B, Nemotron Nano 9B V2, Nemotron 3 Nano: every kind line has M = N (bitwise). Nemotron 3 Nano: the `weight`
+  line counts the router gates as "equal in value, other dtype" (exported in fp32, stored in bf16); they are part of M.
+- Qwen3-30B-A3B: equal up to rounding, so most tensors are not bitwise equal and that is expected. NVIDIA made this
+  release with an older ModelOpt whose scale arithmetic rounds differently in the last bit of fp32 ((amax x 1/6) x 1/448
+  where the pinned version computes amax x 1/2688). Every `weight_scale_2` and `input_scale` must be within relative
+  2.4e-7 (two fp32 units in the last place); the FP8 block scales and FP4 values that the last-bit difference moves
+  across a rounding boundary must be at most 0.2 % of each kind. Its routed experts' input scales are compared with the
+  largest one of their layer and projection (gate and up together, down alone): the release calibrated them per expert,
+  vLLM's NVFP4 MoE kernels serve one activation scale per layer and projection, so the student's experts all take that
+  maximum at train start. Reference run (our B200s, same images and pins): `input_scale 18624 tensors, 6715 bitwise
+  equal`, `weight_scale_2 18624 tensors, 6464 bitwise equal` (both at most 1.76e-07), `weight_scale 18624 tensors,
+  17514 bitwise equal` (block scales differing 0.00072), `weight 18867 tensors, 7664 bitwise equal` (FP4 values
+  differing 0.0008), `VERDICT PASS`.
 - `only in A` / `only in B`: k_scale and v_scale only, in the per-kind counts (scale-1.0 tensors of the FP8 KV cache
   that one side writes and the other does not).
 
-Anything else: stop and report.
+Anything else, or `VERDICT FAIL`: stop and report.
 
 **Smoke runs, what to check.** Everything in this experiment was tested before release except what needs the GPUs:
 training on GPUs 0-3 with four rollout servers on GPUs 4-7; memory (the 30B-class models keep half of the optimizer

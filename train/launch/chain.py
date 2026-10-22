@@ -57,12 +57,16 @@ NEMOTRON_SERVE = ["--mamba-ssm-cache-dtype", "float32", "--no-enable-prefix-cach
 #   kv         the export's KV cache algorithm; release: NVIDIA's NVFP4 release whose exclude list the export carries
 #   bias_rate0 the router expert bias moves every step whatever the LR: the step-0 check freezes it
 #   step0_gpus GPUs (pipeline stages) of the step-0 check: a 30B-class student does not fit one GPU
+#   step0_cmp  extra arguments of the step-0 comparison (train/tests/compare_nvfp4_ckpt.py); none = bitwise equality.
+#              Qwen3-30B-A3B: NVIDIA's release was made by an older ModelOpt whose scale arithmetic rounds differently
+#              in the last bit of fp32 ((amax x 1/6) x 1/448 against the pinned amax x 1/2688), so the step-0 export
+#              matches it up to that rounding; its routed experts' input scales are compared with their layer maximum
 MODELS = {
     "Qwen3-8B": dict(layers=36, length_col="len_qwen3", sampling=QWEN3_SAMPLING, serve=QWEN3_SERVE,
                      recipe="nvfp4_w4a4-qkv_fp8_cast_mcore.yaml", yarn=True, kv="FP8", step0_gpus=1),
     "Qwen3-30B-A3B": dict(layers=48, length_col="len_qwen3", sampling=QWEN3_SAMPLING, serve=QWEN3_SERVE,
                           recipe="nvfp4_w4a4-qkv_fp8_cast_mcore.yaml", yarn=True, kv="FP8", moe_graph=True, pad_id=151643,
-                          step0_gpus=4),
+                          step0_gpus=4, step0_cmp=["--expert-input-max", "--scale-rtol", "2.4e-7", "--max-share", "0.002"]),
     "NVIDIA-Nemotron-Nano-9B-v2": dict(layers=56, length_col="len_n9",
                                        sampling={"temperature": 0.6, "top_p": 0.95, "top_k": -1, "min_p": 0.0},
                                        serve=NEMOTRON_SERVE, recipe="nemotron_nano_v2_nvfp4_w4a4_mcore.yaml", tok_ckpt=True,
@@ -580,7 +584,7 @@ class Chain:
                 continue
             self.log(f"export {s} step {step}")
             (self.out / "train" / "exports").mkdir(parents=True, exist_ok=True)
-            self.nemo_run([0], f"qadx-export-{d}", ["torchrun", "--nproc-per-node", "1", "export_quantized_megatron_to_hf.py",
+            self.nemo_run([0], f"qadx-export-{d}", ["torchrun", "--nproc-per-node", "1", "/cl/export_hf.py",
                                                     "--hf_model_name_or_path", f"/models/{self.model}",
                                                     "--megatron_path", f"/out/{s}/checkpoints/iter_{step:07d}",
                                                     "--export_unified_hf_path", f"/out/exports/{d}"],
@@ -732,13 +736,13 @@ class Chain:
             "--lr_warmup_iters", "0", "--save_interval", "1", "--no_async_save", "--log_interval", "1", "--output_dir", f"/out/{d}"],
             env=env, detach=False)
         self.log("\n".join(l for l in rc.splitlines() if "imported" in l or "Traceback" in l or "Error" in l)[-2000:] or "step done")
-        self.nemo_run([0], "qadx-check-step0-export", ["torchrun", "--nproc-per-node", "1", "export_quantized_megatron_to_hf.py",
+        self.nemo_run([0], "qadx-check-step0-export", ["torchrun", "--nproc-per-node", "1", "/cl/export_hf.py",
                                                        "--hf_model_name_or_path", f"/models/{self.model}",
                                                        "--megatron_path", f"/out/{d}/checkpoints/iter_0000001",
                                                        "--export_unified_hf_path", f"/out/{d}-hf"], env={"HF_HUB_OFFLINE": "1"}, detach=False)
         self.root(f"chmod -R a+rX /out/train/{d}-hf")
         out = sh([str(PY), str(REPO / "train" / "tests" / "compare_nvfp4_ckpt.py"), str(self.out / "train" / f"{d}-hf"),
-                  str(self.models / self.cfg["checkpoint"])], capture=True, check=False)
+                  str(self.models / self.cfg["checkpoint"]), *self.spec.get("step0_cmp", [])], capture=True, check=False)
         (self.out / f"{d}.txt").write_text(out)
         print(out)
         self.root(f"rm -rf /out/train/{d} /out/train/{d}-hf")  # compared: the result is in {d}.txt (rerun to repeat)

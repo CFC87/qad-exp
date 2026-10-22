@@ -45,8 +45,10 @@ contexts, on-policy training).
 19. NemotronH MoE (Nemotron 3 Nano) with CL_IMPORT_INPUT_SCALE: the routed experts' one input quantizer <- the 128
    experts' input_scale (all equal in the checkpoint), their 128 weight quantizers <- the checkpoint's weight_scale_2
    (amax = weight_scale_2 * 6 * 448; NVIDIA's one shared value per layer and projection, max over the experts -- a
-   quantize.py PTQ calibrates every expert on its own max|W_e|), shared experts as dense MLPs. The loaded amax is kept
-   by ModelOpt's restore (no re-calibration), so resumes and exports carry it.
+   quantize.py PTQ calibrates every expert on its own max|W_e|), shared experts as dense MLPs. Every training launch
+   (start, resume, a run from a trained checkpoint) imports them again at train start. ModelOpt's restore gives only expert
+   0 of a grouped linear an amax buffer, so a plain export would drop the others' saved amax and derive their
+   weight_scale_2 from their own max|W|: exports go through export_hf.py, which loads them from the checkpoint.
 20. CL_MOE_PAD_ID=<token id>: MoE models get a padding_mask in their forward that covers each pack's padding tail (the
    trailing run of the rollout's pad id, from where position_ids restart at 0 inside it), so the pack padding neither
    counts for the router expert-bias update nor enters the auxiliary load-balancing loss (Megatron-Bridge passes no
