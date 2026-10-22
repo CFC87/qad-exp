@@ -230,7 +230,7 @@ _OPT = json.loads(os.environ.get("CL_OPTIMIZER_OVERRIDES", "{}") or "{}")
 if _OPT:
     # Optimizer memory options distill.py has no flags for, e.g. for PP=5 at 128K:
     # '{"use_precision_aware_optimizer": true, "exp_avg_dtype": "bfloat16", "exp_avg_sq_dtype": "bfloat16"}' or
-    # '{"use_precision_aware_optimizer": true, "optimizer_cpu_offload": true, "optimizer_offload_fraction": 0.5,
+    # '{"use_precision_aware_optimizer": true, "optimizer_cpu_offload": true, "optimizer_offload_fraction": 0.7,
     #   "overlap_cpu_optimizer_d2h_h2d": true}' (offload needs the precision-aware code path; its dtypes stay fp32).
     import torch
     import megatron.bridge.training.distill as _bdistill_opt

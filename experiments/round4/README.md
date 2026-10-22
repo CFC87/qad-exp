@@ -92,12 +92,14 @@ other.
     criteria expected bitwise equality, which this release cannot meet.
 - If you ran a smoke with an earlier version (Qwen3-30B-A3B, Nemotron 3 Nano), run it again after pulling: the CPU
   offload went from 50 % to 70 % of the optimizer state (at 50 % Qwen3-30B-A3B ran out of GPU memory), and Nemotron 3
-  Nano's export changed. First remove what the earlier smoke left (`S` as in the smoke table below; the smoke's export
-  is `smoke-r4-q30-s002`, `smoke-r4-q30-s004` for `smoke_q30_long`, `smoke-r4-n3-s002`; `out/train/<S>` was written by
-  the trainer as root):
+  Nano's export changed. First remove what the earlier smoke left (`N` and `S` as in the smoke table below; the
+  smoke's export is `smoke-r4-q30-s002`, `smoke-r4-q30-s004` for `smoke_q30_long`, `smoke-r4-n3-s002`;
+  `out/train/<S>` was written by the trainer as root), and move its chain log aside (the chain appends to it, so the
+  smoke check 1 would still find the earlier run's lines):
 
   ```bash
   python3 train/launch/chain.py experiments/round4/<smoke config> stop --layout 1node
+  mv out/<N>.chain.log out/<N>.chain.log.old
   rm -rf out/runs/<S> out/exports/<smoke export>
   IMG=$(python3 -c "import tomllib; v = tomllib.load(open('env/versions.toml', 'rb'))['images']['nemo']; print(v['ref'] + '@' + v['digest'])")
   docker run --rm -v $PWD/out:/out --entrypoint rm $IMG -rf /out/train/<S> /out/train/<S>.init
