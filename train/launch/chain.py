@@ -707,7 +707,9 @@ class Chain:
     def check_step0(self):
         """Step 0 of training must be the start checkpoint: load the PTQ student, import the checkpoint's static scales,
         run one step at learning rate 0 (weights unchanged), save, export to Hugging Face format, and compare every
-        tensor with the checkpoint. Expected: every weight, weight_scale, weight_scale_2 and input_scale identical; a
+        tensor with the checkpoint (the comparison's last line is VERDICT PASS / FAIL). Expected: every weight,
+        weight_scale, weight_scale_2 and input_scale identical -- Qwen3-30B-A3B equal up to the last-bit rounding of
+        NVIDIA's older ModelOpt, its routed experts' input scales against their layer maximum (MODELS step0_cmp); a
         float tensor in another dtype counts as equal when its values are (Nemotron 3 Nano: the router gate is exported
         in fp32, stored in bf16); FP8-cast k_scale / v_scale = 1.0 may exist on one side only. GPUs 0.. (one for an
         8B-class model; four, pipeline parallel, for a 30B-class one, whose student with its optimizer does not fit one
@@ -741,8 +743,9 @@ class Chain:
                                                        "--megatron_path", f"/out/{d}/checkpoints/iter_0000001",
                                                        "--export_unified_hf_path", f"/out/{d}-hf"], env={"HF_HUB_OFFLINE": "1"}, detach=False)
         self.root(f"chmod -R a+rX /out/train/{d}-hf")
-        out = sh([str(PY), str(REPO / "train" / "tests" / "compare_nvfp4_ckpt.py"), str(self.out / "train" / f"{d}-hf"),
-                  str(self.models / self.cfg["checkpoint"]), *self.spec.get("step0_cmp", [])], capture=True, check=False)
+        r = subprocess.run([str(PY), str(REPO / "train" / "tests" / "compare_nvfp4_ckpt.py"), str(self.out / "train" / f"{d}-hf"),
+                            str(self.models / self.cfg["checkpoint"]), *self.spec.get("step0_cmp", [])], capture_output=True, text=True)
+        out = r.stdout if "VERDICT " in r.stdout else r.stdout + r.stderr  # stderr only without a verdict: VERDICT stays the last line
         (self.out / f"{d}.txt").write_text(out)
         print(out)
         self.root(f"rm -rf /out/train/{d} /out/train/{d}-hf")  # compared: the result is in {d}.txt (rerun to repeat)

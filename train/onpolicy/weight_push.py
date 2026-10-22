@@ -1,6 +1,6 @@
 """Push the live student's NVFP4 weights from a PP-split trainer into the rollout vLLM server(s) after every
 optimizer step. Verified on GPU: after a push, the servers hold exactly the weights a fresh server loads from the
-offline HF export of the same checkpoint (bit-exact).
+offline HF export of the same checkpoint (train/export_hf.py; bit-exact).
 
 vLLM's NCCL weight-transfer backend has a single sender. One training rank (CL_WEIGHT_PUSH_SENDER, preferably the
 stage with the fastest link to the rollout servers) is that sender; every rank exports its own layers with
@@ -141,9 +141,10 @@ class PPWeightPusher:
         from modelopt.torch.export.unified_export_megatron import GPTModelExporter
         sd = OrderedDict()
         for chunk in self.chunks:
-            # moe_router_dtype as the offline export (export_quantized_megatron_to_hf.py): NemotronH MoE (Nemotron 3 Nano)
-            # keeps its router expert bias (e_score_correction_bias, values ~40-66) in fp32; without it the bias went out
-            # as bf16 (steps of 0.25-0.5 there) and the bias updates (~1e-3 per step) would never reach the server
+            # moe_router_dtype as the offline export (train/export_hf.py -> export_quantized_megatron_to_hf.py):
+            # NemotronH MoE (Nemotron 3 Nano) keeps its router expert bias (e_score_correction_bias, values ~40-66) in fp32;
+            # without it the bias went out as bf16 (steps of 0.25-0.5 there) and the bias updates (~1e-3 per step) would
+            # never reach the server
             m = _unwrap(chunk)
             ex = GPTModelExporter(m, self.hf_path, dtype=torch.bfloat16, moe_router_dtype=getattr(m.config, 'moe_router_dtype', None))
             for _, lsd in ex.layer_state_dicts.items():

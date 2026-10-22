@@ -22,6 +22,9 @@ for anyone).
     evaluation data, including 13 GB of unpacked LiveCodeBench Pro test cases);
   - about 500 GB per Qwen3-8B training chain while it runs, up to about 1.4 TB for the 30B-class models of
     `experiments/round4`; `chain.py clean` frees it after the exports (see the experiment README).
+- Host memory: the 30B-class models of `experiments/round4` with `--layout 1node` keep 70 % of the optimizer state in
+  CPU memory, about 500 GB for the four training processes of a node and more while a checkpoint is written (measured
+  numbers in the experiment README).
 
 ## Setup
 

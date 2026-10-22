@@ -58,13 +58,15 @@ the layout (`--layout`) and the output directory (`--out`); the ports are fixed 
   `optional-models`, plus each Nemotron's start checkpoint built by `prepare`.
 - **Host memory, 30B-class models with `--layout 1node`:** 70 % of the optimizer state lives in CPU memory (the
   `optimizer_overrides` of the config; fp32 numerics kept). Measured per training process (one pipeline stage, 131,072-token
-  packs, 2 steps): about 105-125 GB while training, more while a checkpoint is written, so about 500 GB for the four
-  stages of a node, plus the save. With `--layout 2node` (8 pipeline stages) the optimizer stays on the GPUs (estimate;
-  the smoke run shows it).
-- **GPU memory, same setting, measured:** step-2 peaks per stage (GB, 1e9 bytes) Qwen3-30B-A3B 168.3 / 161.5 / 154.5 /
-  150.1, Nemotron 3 Nano 158.3 / 164.5 / 155.1 / 149.4 (at most about 157 GiB of 178 GiB). With half of the optimizer on
-  the CPU, Qwen3-30B-A3B's first stage ran out of GPU memory in step 2 and Nemotron 3 Nano reached about 171 GiB, hence
-  0.7.
+  packs, 2 steps; process RSS in the trainer's `offload optimizer step` lines, GB = 1e9 bytes): about 105-125 GB while
+  training, more while a checkpoint is written, so about 500 GB for the four stages of a node, plus the save. With
+  `--layout 2node` (8 pipeline stages) the optimizer stays on the GPUs (estimate, not measured).
+- **GPU memory, same setting, measured:** the trainer's line `offload optimizer step 2: ... GPU max allocated <x> GB`
+  (PyTorch's peak allocation in step 2, GB = 1e9 bytes), per stage: Qwen3-30B-A3B 168.3 / 161.5 / 154.5 / 150.1,
+  Nemotron 3 Nano 158.3 / 164.5 / 155.1 / 149.4. The largest, 168.3 GB, is 156.7 GiB of the B200's 179.06 GiB
+  (183,359 MiB in `nvidia-smi`, which shows more than PyTorch allocates: the CUDA context and cached blocks). With half
+  of the optimizer on the CPU, Qwen3-30B-A3B's first stage ran out of GPU memory in step 2 and Nemotron 3 Nano reached
+  about 171 GiB, hence 0.7.
 
 ## Order of work: one model per node
 
@@ -88,6 +90,24 @@ other.
     the shared scales again at train start.
   - Qwen3-30B-A3B: the comparison now accepts last-bit rounding differences (pass criteria below); the earlier
     criteria expected bitwise equality, which this release cannot meet.
+- If you ran a smoke with an earlier version (Qwen3-30B-A3B, Nemotron 3 Nano), run it again after pulling: the CPU
+  offload went from 50 % to 70 % of the optimizer state (at 50 % Qwen3-30B-A3B ran out of GPU memory), and Nemotron 3
+  Nano's export changed. First remove what the earlier smoke left (`S` as in the smoke table below; the smoke's export
+  is `smoke-r4-q30-s002`, `smoke-r4-q30-s004` for `smoke_q30_long`, `smoke-r4-n3-s002`; `out/train/<S>` was written by
+  the trainer as root):
+
+  ```bash
+  python3 train/launch/chain.py experiments/round4/<smoke config> stop --layout 1node
+  rm -rf out/runs/<S> out/exports/<smoke export>
+  IMG=$(python3 -c "import tomllib; v = tomllib.load(open('env/versions.toml', 'rb'))['images']['nemo']; print(v['ref'] + '@' + v['digest'])")
+  docker run --rm -v $PWD/out:/out --entrypoint rm $IMG -rf /out/train/<S> /out/train/<S>.init
+  ```
+
+  Qwen3-30B-A3B: run `smoke_q30` again, then `smoke_q30_long` (it starts from `smoke_q30`'s step 2).
+- Nemotron 3 Nano exports made with an earlier version (`out/exports/r4-n3-*`, `out/exports/smoke-r4-n3-*`) carry the
+  wrong expert scales: remove them, and for the training run export again with
+  `python3 train/launch/chain.py experiments/round4/n3.toml export` while its trainer checkpoints are still there
+  (before `clean`).
 
 **On every node first** (after the general setup of `README.md`):
 
@@ -133,31 +153,35 @@ python3 train/launch/chain.py $E/n3.toml run --layout 1node     # 240 steps: exp
 Run long commands with `nohup ... &` or in `tmux` and follow `out/<name>.chain.log`.
 
 **Step-0 check, pass criteria** (`out/check-step0.txt`). A is the student exported at step 0, B the start checkpoint.
-The file has one line per tensor kind (`<kind> N tensors, M bitwise equal`; when some differ, how much: the largest
-relative difference of a scale, the share of differing FP8 block scales or FP4 values, and the worst tensor), two lines
-`only in A: <count> (<count per kind>) [first 5 names]` and `only in B: ...`, and a last line `VERDICT PASS (...)` or
-`VERDICT FAIL (...)` with the reasons. Pass = `VERDICT PASS`. What it checks:
+The file has one line per tensor kind (`<kind> N tensors, M bitwise equal`, with padded columns; when some differ,
+how much: the largest relative difference of a scale, the share of differing FP8 block scales or FP4 values, and the
+worst tensor), for Qwen3-30B-A3B one line `input_scale reference: 18432 routed-expert input scales of B taken as their
+layer and projection maximum`, two lines `only in A: <count> (<count per kind>) [first 5 names]` and `only in B: ...`
+(with count 0: `only in A: 0 []`), and a last line `VERDICT PASS (...)` or `VERDICT FAIL (...)` with the reasons.
+Pass = `VERDICT PASS`. What it checks:
 - Qwen3-8B, Nemotron Nano 9B V2, Nemotron 3 Nano: every kind line has M = N (bitwise). Nemotron 3 Nano: the `weight`
   line counts the router gates as "equal in value, other dtype" (exported in fp32, stored in bf16); they are part of M.
-- Qwen3-30B-A3B: equal up to rounding, so most tensors are not bitwise equal and that is expected. NVIDIA made this
+- Qwen3-30B-A3B: equal up to rounding, so many tensors are not bitwise equal and that is expected. NVIDIA made this
   release with an older ModelOpt whose scale arithmetic rounds differently in the last bit of fp32 ((amax x 1/6) x 1/448
   where the pinned version computes amax x 1/2688). Every `weight_scale_2` and `input_scale` must be within relative
-  2.4e-7 (two fp32 units in the last place); the FP8 block scales and FP4 values that the last-bit difference moves
-  across a rounding boundary must be at most 0.2 % of each kind. Its routed experts' input scales are compared with the
-  largest one of their layer and projection (gate and up together, down alone): the release calibrated them per expert,
-  vLLM's NVFP4 MoE kernels serve one activation scale per layer and projection, so the student's experts all take that
-  maximum at train start. Reference run (our B200s, same images and pins): `input_scale 18624 tensors, 6715 bitwise
-  equal`, `weight_scale_2 18624 tensors, 6464 bitwise equal` (both at most 1.76e-07), `weight_scale 18624 tensors,
-  17514 bitwise equal` (block scales differing 0.00072), `weight 18867 tensors, 7664 bitwise equal` (FP4 values
-  differing 0.0008), `VERDICT PASS`.
+  2.4e-7 (two fp32 units in the last place); the FP8 block scales and FP4 values that differ at all (by any amount:
+  the last-bit difference moves them across a rounding boundary) must be at most 0.2 % of each kind. Its routed
+  experts' input scales are compared with the largest one of their layer and projection (gate and up together, down
+  alone): the release calibrated them per expert, vLLM's NVFP4 MoE kernels serve one activation scale per layer and
+  projection, so the student's experts all take that maximum at train start. Reference run (our B200s, same images and
+  pins): `input_scale 18624 tensors, 6715 bitwise equal`, `weight_scale_2 18624 tensors, 6464 bitwise equal` (both at
+  most 1.76e-07), `weight_scale 18624 tensors, 17514 bitwise equal` (block scales differing 0.00072), `weight 18867
+  tensors, 7664 bitwise equal` (FP4 values differing 0.0008), `input_scale reference: 18432 routed-expert input scales
+  ...`, `only in A: 0 []`, `only in B: 96 (k_scale 48, v_scale 48)`, `VERDICT PASS`.
 - `only in A` / `only in B`: k_scale and v_scale only, in the per-kind counts (scale-1.0 tensors of the FP8 KV cache
   that one side writes and the other does not).
 
 Anything else, or `VERDICT FAIL`: stop and report.
 
 **Smoke runs, what to check.** Everything in this experiment was tested before release except what needs the GPUs:
-training on GPUs 0-3 with four rollout servers on GPUs 4-7; memory (the 30B-class models keep 70 % of the optimizer
-state in CPU memory; stage 2 of Qwen3-30B-A3B trains at 131,072 tokens with YaRN); the weight push into the servers
+training on GPUs 0-3 with four rollout servers on GPUs 4-7; memory on your nodes (measured on our B200s, see
+Requirements; the smoke confirms it on yours: the 30B-class models keep 70 % of the optimizer state in CPU memory, and
+stage 2 of Qwen3-30B-A3B trains at 131,072 tokens with YaRN); the weight push into the servers
 after each step; the multi-turn episodes (for Nemotron 3 Nano through the parse service); and the time per step.
 A smoke run tests these in 2 steps of the real list. Its numbers are not results. Do all five checks before `clean`,
 which removes `out/train/<segment>` and with it `metrics.jsonl`. In the commands, `N` is the smoke's name and `S` its
@@ -171,7 +195,8 @@ segment:
 | `smoke_n3.toml` | `smoke-r4-n3` | `smoke-r4-n3-s002` |
 
 While a smoke runs, log memory every 30 s from a second terminal, and stop it with Ctrl-C when the smoke has ended
-(columns: time, host memory available in GB, memory used on GPUs 0-3 in MiB):
+(columns: time, host memory available in GiB as `free -g` prints it, memory used on GPUs 0-3 in MiB as `nvidia-smi`
+prints it):
 
 ```bash
 N=smoke-r4-n3   # this node's smoke
@@ -192,14 +217,16 @@ After it ends (`N=...; S=...` as in the table):
 2. **Memory.**
 
    ```bash
-   awk 'NR==1||$2<h{h=$2} {for(i=3;i<=6;i++) if($i>g) g=$i} END{print "host available min " h " GB; GPUs 0-3 max " g " MiB"}' out/$N.mem.log
-   grep -ciE "out of memory" out/runs/$S/trainer.log           # the count must be 0
-   grep -m2 "offload optimizer step" out/runs/$S/trainer.log   # 30B-class models with --layout 1node: these lines must be there
+   awk 'NR==1||$2<h{h=$2} {for(i=3;i<=6;i++) if($i>g) g=$i} END{print "host available min " h " GiB; GPUs 0-3 max " g " MiB"}' out/$N.mem.log
+   grep -ciE "out of memory" out/runs/$S/trainer.log             # the count must be 0
+   grep "offload optimizer step 2" out/runs/$S/trainer.log       # 30B-class models with --layout 1node: one line per stage
    ```
 
-   Pass: no out-of-memory error. The 30B-class models also print `offload optimizer step` lines (70 % of the
-   optimizer state in CPU memory). Report before starting the run if a training GPU went above 178,000 MiB (within
-   5 GB of the 183,359 MiB total) or the host had less than 20 GB available at any point. An out-of-memory error: stop
+   Pass: no out-of-memory error. The 30B-class models also print four `offload optimizer step 2` lines (70 % of the
+   optimizer state in CPU memory); their `GPU max allocated` and `process RSS` are the measures of the reference
+   numbers under Requirements (GB), so compare those with them, not the `nvidia-smi` column. Report before starting
+   the run if a training GPU went above 178,000 MiB in the memory log (within about 5 GiB of the 183,359 MiB total) or
+   the host had less than 20 GiB available at any point. An out-of-memory error: stop
    and report. The CPU offload fraction is the knob; do not change it yourself.
 
 3. **Weight push.**
@@ -278,8 +305,8 @@ Send the output of the five checks for every smoke run, also when all pass.
 
 **Disk.**
 - `clean` a chain once its exports exist. It keeps the exports.
-- Smoke exports are not needed after the smoke checks: `rm -rf out/exports/smoke-r4-*` (the one of
-  `smoke_q30_long` is `smoke-r4-q30-s004`).
+- Smoke exports are not needed after the smoke checks and the smokes' `clean` (`clean` refuses while a chain's export
+  is missing): then `rm -rf out/exports/smoke-r4-*` (the one of `smoke_q30_long` is `smoke-r4-q30-s004`).
 - Qwen3-30B-A3B: run `clean` of `q30_stage1.toml` only after stage 2 has started, that is once
   `out/r4-q30-long.chain.log` shows `INIT_CKPT_OK iter_0000180`. Stage 2 lays out its start from stage 1's step-180
   checkpoint when it launches, into `out/train/r4-q30-long-s060.init`. A restart of stage 2 still finds it after

@@ -27,8 +27,9 @@ contexts, on-policy training).
    vLLM server(s) over NCCL before each step is reported done (onpolicy/weight_push.py).
 11. CL_OPTIMIZER_OVERRIDES (JSON) sets OptimizerConfig fields, e.g. bf16 Adam states or optimizer CPU offload. Offload
    keeping fp32 numerics (30B class on PP=4 at 128K): '{"use_precision_aware_optimizer": true, "optimizer_cpu_offload":
-   true, "optimizer_offload_fraction": 0.5, "overlap_cpu_optimizer_d2h_h2d": true}'; with it, resuming keeps the fp32
-   masters and the Adam step (two fixes, see below), and the first steps print optimizer time and host memory.
+   true, "optimizer_offload_fraction": 0.7, "overlap_cpu_optimizer_d2h_h2d": true}' (0.5 ran out of GPU memory); with
+   it, resuming keeps the fp32 masters and the Adam step (two fixes, see below), and the first steps print optimizer
+   time and host memory.
 12. CL_IMPORT_INPUT_SCALE=<HF NVFP4 checkpoint dir> sets the student's activation quantizers to that checkpoint's static
    input scales (amax = input_scale * 6 * 448) once the student is loaded, before the first step, so step 0 is the
    evaluated checkpoint rather than our own calibration (dense Qwen3: linear_qkv <- q_proj, linear_proj <- o_proj,
