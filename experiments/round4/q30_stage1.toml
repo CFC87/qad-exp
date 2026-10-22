@@ -15,5 +15,5 @@ min_lr = 1e-6
 val_n = 187
 expected_json = "train/configs/expected_bench_8b.json"   # Qwen3 family starting estimates; the controller corrects them online
 
-[optimizer_overrides]           # 1node: 4 pipeline stages of a 30B-class student need part of the optimizer on the CPU (fp32 kept)
-1node = { use_precision_aware_optimizer = true, optimizer_cpu_offload = true, optimizer_offload_fraction = 0.5, overlap_cpu_optimizer_d2h_h2d = true }
+[optimizer_overrides]           # 1node: 4 pipeline stages of a 30B-class student need 70 % of the optimizer on the CPU (fp32 kept; at 0.5 stage 1 ran out of GPU memory in step 2)
+1node = { use_precision_aware_optimizer = true, optimizer_cpu_offload = true, optimizer_offload_fraction = 0.7, overlap_cpu_optimizer_d2h_h2d = true }

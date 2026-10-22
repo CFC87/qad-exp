@@ -19,4 +19,4 @@ val_n = 187
 expected_json = "train/configs/expected_bench_8b.json"
 
 [optimizer_overrides]
-1node = { use_precision_aware_optimizer = true, optimizer_cpu_offload = true, optimizer_offload_fraction = 0.5, overlap_cpu_optimizer_d2h_h2d = true }
+1node = { use_precision_aware_optimizer = true, optimizer_cpu_offload = true, optimizer_offload_fraction = 0.7, overlap_cpu_optimizer_d2h_h2d = true }

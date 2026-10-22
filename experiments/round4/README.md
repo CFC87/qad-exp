@@ -56,9 +56,15 @@ the layout (`--layout`) and the output directory (`--out`); the ports are fixed 
   checkpoint is written before the previous one is removed), Qwen3-30B-A3B about 1.4 TB while stage 2 runs and stage 1
   is not cleaned yet. Exports: about 17 GB (30B class) and 7 GB (Nano 9B v2) each. Under `models/`: about 300 GB for
   `optional-models`, plus each Nemotron's start checkpoint built by `prepare`.
-- **Host memory, 30B-class models with `--layout 1node`:** half of the optimizer state lives in CPU memory (the
-  `optimizer_overrides` of the config; fp32 numerics kept), about 250 GB on the training node (estimate). With
-  `--layout 2node` (8 pipeline stages) the optimizer stays on the GPUs (estimate; the smoke run shows it).
+- **Host memory, 30B-class models with `--layout 1node`:** 70 % of the optimizer state lives in CPU memory (the
+  `optimizer_overrides` of the config; fp32 numerics kept). Measured per training process (one pipeline stage, 131,072-token
+  packs, 2 steps): about 105-125 GB while training, more while a checkpoint is written, so about 500 GB for the four
+  stages of a node, plus the save. With `--layout 2node` (8 pipeline stages) the optimizer stays on the GPUs (estimate;
+  the smoke run shows it).
+- **GPU memory, same setting, measured:** step-2 peaks per stage (GB, 1e9 bytes) Qwen3-30B-A3B 168.3 / 161.5 / 154.5 /
+  150.1, Nemotron 3 Nano 158.3 / 164.5 / 155.1 / 149.4 (at most about 157 GiB of 178 GiB). With half of the optimizer on
+  the CPU, Qwen3-30B-A3B's first stage ran out of GPU memory in step 2 and Nemotron 3 Nano reached about 171 GiB, hence
+  0.7.
 
 ## Order of work: one model per node
 
@@ -150,7 +156,7 @@ relative difference of a scale, the share of differing FP8 block scales or FP4 v
 Anything else, or `VERDICT FAIL`: stop and report.
 
 **Smoke runs, what to check.** Everything in this experiment was tested before release except what needs the GPUs:
-training on GPUs 0-3 with four rollout servers on GPUs 4-7; memory (the 30B-class models keep half of the optimizer
+training on GPUs 0-3 with four rollout servers on GPUs 4-7; memory (the 30B-class models keep 70 % of the optimizer
 state in CPU memory; stage 2 of Qwen3-30B-A3B trains at 131,072 tokens with YaRN); the weight push into the servers
 after each step; the multi-turn episodes (for Nemotron 3 Nano through the parse service); and the time per step.
 A smoke run tests these in 2 steps of the real list. Its numbers are not results. Do all five checks before `clean`,
@@ -191,7 +197,7 @@ After it ends (`N=...; S=...` as in the table):
    grep -m2 "offload optimizer step" out/runs/$S/trainer.log   # 30B-class models with --layout 1node: these lines must be there
    ```
 
-   Pass: no out-of-memory error. The 30B-class models also print `offload optimizer step` lines (half of the
+   Pass: no out-of-memory error. The 30B-class models also print `offload optimizer step` lines (70 % of the
    optimizer state in CPU memory). Report before starting the run if a training GPU went above 178,000 MiB (within
    5 GB of the 183,359 MiB total) or the host had less than 20 GB available at any point. An out-of-memory error: stop
    and report. The CPU offload fraction is the knob; do not change it yourself.
