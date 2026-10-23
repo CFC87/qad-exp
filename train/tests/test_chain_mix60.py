@@ -59,13 +59,11 @@ def main():
         assert all(m["sim_kw"] == {"tool_max_tokens": 8192} and m["deadline_s"] == 1200 for m in cc["multiturn"].values()), (f, cc["multiturn"])
     print("round 4: multi-turn settings unchanged")
     # 3. schedules, export names, the stage-2 start
-    want = {"q30_stage1": ([240], [40], ["mix60-q30-s200", "mix60-q30-s220", "mix60-q30-s240"]),
-            "q30_stage2": ([60], [15], ["mix60-q30-s270", "mix60-q30-s300"]),
-            "n9": ([300], [50], ["mix60-n9-s250", "mix60-n9-s280", "mix60-n9-s300"]),
-            "n3": ([300], [50], ["mix60-n3-s250", "mix60-n3-s280", "mix60-n3-s300"])}
+    want = {"q30_stage1": ([240], [40], ["mix60-q30-s240"]), "q30_stage2": ([60], [15], ["mix60-q30-s300"]),
+            "n9": ([300], [50], ["mix60-n9-s300"]), "n3": ([300], [50], ["mix60-n3-s300"])}
     for f, (b, d, names) in want.items():
         c = chain.Chain(M60 / f"{f}.toml", ns(out))
-        assert (c.budgets, c.decays) == (b, d) and [c.export_name(x) for _, x in c.export_steps()] == names, (f, c.budgets, c.export_steps())
+        assert (c.budgets, c.decays) == (b, d) and c.kw(0) == [] and [c.export_name(x) for _, x in c.export_steps()] == names, (f, c.budgets, c.export_steps())
     c1 = chain.Chain(M60 / "q30_stage1.toml", ns(out))
     assert c2.init_from == c1.seg(0) == "mix60-q30-s240" and c2.yarn and c2.cfg["window"] == 131072
     s1, s2 = chain.Chain(M60 / "smoke_q30.toml", ns(out)), chain.Chain(M60 / "smoke_q30_long.toml", ns(out))

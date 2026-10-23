@@ -1,5 +1,5 @@
 # Qwen3-30B-A3B, stage 2 of 2: long context with YaRN x4 (window 131,072), 60 steps from stage 1's step-240 weights (a
-# new optimizer and schedule), WSD decay over the last 15; weights exported at 30 and 60 as mix60-q30-s270 / s300. The
+# new optimizer and schedule), WSD decay over the last 15; the last step's weights exported as mix60-q30-s300. The
 # long-context list is round 4's stage-2 list (the same file: long context was already at 60 steps there).
 include = "base.toml"
 name = "mix60-q30-long"
@@ -13,7 +13,7 @@ rope = "yarn"
 window = 131072
 budgets = [60]
 decays = [15]
-keep_weights = [30]
+keep_weights = []
 lr = 1e-5
 min_lr = 1e-6
 val_n = 187

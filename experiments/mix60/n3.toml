@@ -1,5 +1,5 @@
-# Nemotron 3 Nano 30B-A3B: all five domains in one run (window 131,072), 300 steps, WSD decay over the last 50; weights
-# exported at 250, 280 and 300 (mix60-n3-s250 / s280 / s300). Learning rate as NVIDIA's QAD of this model.
+# Nemotron 3 Nano 30B-A3B: all five domains in one run (window 131,072), 300 steps, WSD decay over the last 50; the last
+# step's weights exported (mix60-n3-s300). Learning rate as NVIDIA's QAD of this model.
 include = "base_mt.toml"
 name = "mix60-n3"
 model = "NVIDIA-Nemotron-3-Nano-30B-A3B-BF16"
@@ -8,7 +8,7 @@ subset = "mix60_n3_s20261023"
 window = 131072
 budgets = [300]
 decays = [50]
-keep_weights = [250, 280]
+keep_weights = []
 lr = 1e-5
 min_lr = 1e-6
 val_n = 300

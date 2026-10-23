@@ -116,9 +116,9 @@ EXPORTS_DIR = paths.REPO / "out" / "exports"
 EXPORTS = {**{f"r4-q30-s{s}": "qwen3-30b-a3b" for s in (150, 160, 180, 210, 240)},
            **{f"r4-n9-s{s}": "nemotron-nano-9b-v2" for s in (200, 220, 240)},
            **{f"r4-n3-s{s}": "nemotron-3-nano-30b-a3b" for s in (200, 220, 240)},
-           **{f"mix60-q30-s{s}": "qwen3-30b-a3b" for s in (200, 220, 240, 270, 300)},
-           **{f"mix60-n9-s{s}": "nemotron-nano-9b-v2" for s in (250, 280, 300)},
-           **{f"mix60-n3-s{s}": "nemotron-3-nano-30b-a3b" for s in (250, 280, 300)}}
+           **{f"mix60-q30-s{s}": "qwen3-30b-a3b" for s in (240, 300)},
+           "mix60-n9-s300": "nemotron-nano-9b-v2",
+           "mix60-n3-s300": "nemotron-3-nano-30b-a3b"}
 
 
 def model_id(name):

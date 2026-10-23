@@ -1,5 +1,5 @@
 # Qwen3-30B-A3B, stage 1 of 2: reasoning, code, function calling and customer service with its native RoPE (window
-# 40,960), 240 steps, WSD decay over the last 40; weights exported at 200, 220 and 240 (mix60-q30-s200 / s220 / s240).
+# 40,960), 240 steps, WSD decay over the last 40; the last step's weights exported (mix60-q30-s240).
 include = "base_mt.toml"
 name = "mix60-q30"
 model = "Qwen3-30B-A3B"
@@ -9,7 +9,7 @@ rope = "plain"
 window = 40960
 budgets = [240]
 decays = [40]
-keep_weights = [200, 220]
+keep_weights = []
 lr = 1e-5
 min_lr = 1e-6
 val_n = 187

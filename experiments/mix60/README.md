@@ -2,14 +2,14 @@
 
 On-policy QAD (NVFP4) of **Qwen3-30B-A3B**, **Nemotron Nano 9B v2** and **Nemotron 3 Nano 30B-A3B** on a mixture of
 five training domains with 60 training steps of data for every domain, each model with its own list built by the same
-method. Weights at the listed steps are exported and evaluated on the five report categories.
+method. The last step of each run is exported and evaluated on the five report categories.
 
 | Config | Model | List | Steps (decay) | Exported | Learning rate |
 |---|---|---|---|---|---|
-| `q30_stage1.toml` | Qwen3-30B-A3B | `mix60_s1_q30_s20261023`: reasoning, code, function calling, customer service (native RoPE, 40,960) | 240 (last 40) | `mix60-q30-s200`, `-s220`, `-s240` | 1e-5 → 1e-6 |
-| `q30_stage2.toml` | Qwen3-30B-A3B | `mix_r4_s2_long_q30_s20261021`: long context (YaRN x4, 131,072), from stage 1's step 240 | 60 (last 15) | `mix60-q30-s270`, `-s300` | 1e-5 → 1e-6 |
-| `n9.toml` | Nemotron Nano 9B v2 | `mix60_n9_s20261023`: all five domains (131,072) | 300 (last 50) | `mix60-n9-s250`, `-s280`, `-s300` | 1e-6 → 1e-7 |
-| `n3.toml` | Nemotron 3 Nano 30B-A3B | `mix60_n3_s20261023`: all five domains (131,072) | 300 (last 50) | `mix60-n3-s250`, `-s280`, `-s300` | 1e-5 → 1e-6 |
+| `q30_stage1.toml` | Qwen3-30B-A3B | `mix60_s1_q30_s20261023`: reasoning, code, function calling, customer service (native RoPE, 40,960) | 240 (last 40) | `mix60-q30-s240` | 1e-5 → 1e-6 |
+| `q30_stage2.toml` | Qwen3-30B-A3B | `mix_r4_s2_long_q30_s20261021`: long context (YaRN x4, 131,072), from stage 1's step 240 | 60 (last 15) | `mix60-q30-s300` | 1e-5 → 1e-6 |
+| `n9.toml` | Nemotron Nano 9B v2 | `mix60_n9_s20261023`: all five domains (131,072) | 300 (last 50) | `mix60-n9-s300` | 1e-6 → 1e-7 |
+| `n3.toml` | Nemotron 3 Nano 30B-A3B | `mix60_n3_s20261023`: all five domains (131,072) | 300 (last 50) | `mix60-n3-s300` | 1e-5 → 1e-6 |
 
 Shared settings are in `base.toml` and `base_mt.toml`. Do not change them (CLAUDE.md, rule 6). The only free knobs are
 the layout (`--layout`) and the output directory (`--out`); the ports are fixed in `train/launch/chain.py`.
@@ -96,8 +96,8 @@ python3 train/launch/chain.py $E/q30_stage1.toml check-step0    # only if not pa
 python3 train/launch/chain.py $E/smoke_q30.toml run --layout 1node        # stage-1 path, 2 steps; then the smoke checks below
 python3 train/launch/chain.py $E/smoke_q30_long.toml run --layout 1node   # stage-2 path (from the smoke's step 2, YaRN), 2 steps; smoke checks
 python3 train/launch/chain.py $E/smoke_q30_long.toml clean && python3 train/launch/chain.py $E/smoke_q30.toml clean   # after both passed
-python3 train/launch/chain.py $E/q30_stage1.toml run --layout 1node   # 240 steps: exports mix60-q30-s200, -s220, -s240
-python3 train/launch/chain.py $E/q30_stage2.toml run --layout 1node   # 60 steps from stage 1's step 240: mix60-q30-s270, -s300
+python3 train/launch/chain.py $E/q30_stage1.toml run --layout 1node   # 240 steps: exports mix60-q30-s240
+python3 train/launch/chain.py $E/q30_stage2.toml run --layout 1node   # 60 steps from stage 1's step 240: mix60-q30-s300
 ```
 
 **Node B: Nemotron Nano 9B v2**
@@ -107,7 +107,7 @@ python3 train/launch/chain.py $E/n9.toml prepare
 python3 train/launch/chain.py $E/n9.toml check-step0            # only if not passed with round 4's version
 python3 train/launch/chain.py $E/smoke_n9.toml run --layout 1node   # 2 steps; then the smoke checks below
 python3 train/launch/chain.py $E/smoke_n9.toml clean                 # after the checks passed
-python3 train/launch/chain.py $E/n9.toml run --layout 1node     # 300 steps: exports mix60-n9-s250, -s280, -s300
+python3 train/launch/chain.py $E/n9.toml run --layout 1node     # 300 steps: exports mix60-n9-s300
 ```
 
 **Node C: Nemotron 3 Nano 30B-A3B**
@@ -117,7 +117,7 @@ python3 train/launch/chain.py $E/n3.toml prepare
 python3 train/launch/chain.py $E/n3.toml check-step0            # only if not passed with round 4's version
 python3 train/launch/chain.py $E/smoke_n3.toml run --layout 1node   # 2 steps; then the smoke checks below
 python3 train/launch/chain.py $E/smoke_n3.toml clean                 # after the checks passed
-python3 train/launch/chain.py $E/n3.toml run --layout 1node     # 300 steps: exports mix60-n3-s250, -s280, -s300
+python3 train/launch/chain.py $E/n3.toml run --layout 1node     # 300 steps: exports mix60-n3-s300
 ```
 
 Run long commands with `nohup ... &` or in `tmux` and follow `out/<name>.chain.log`. `dryrun` prints every segment's
@@ -157,10 +157,10 @@ On the same node, after its chains are done, as in `experiments/round4/README.md
 exports:
 
 ```bash
-.venv-client/bin/python eval/run.py --arm mix60-q30-s200 --arm mix60-q30-s220 --arm mix60-q30-s240 --arm mix60-q30-s270 --arm mix60-q30-s300 --dry-run
-nohup .venv-client/bin/python eval/run.py --arm mix60-q30-s200 --arm mix60-q30-s220 --arm mix60-q30-s240 --arm mix60-q30-s270 --arm mix60-q30-s300 > eval-mix60-q30.log 2>&1 &
-nohup .venv-client/bin/python eval/run.py --arm mix60-n9-s250 --arm mix60-n9-s280 --arm mix60-n9-s300 > eval-mix60-n9.log 2>&1 &   # node B
-nohup .venv-client/bin/python eval/run.py --arm mix60-n3-s250 --arm mix60-n3-s280 --arm mix60-n3-s300 > eval-mix60-n3.log 2>&1 &   # node C
+.venv-client/bin/python eval/run.py --arm mix60-q30-s240 --arm mix60-q30-s300 --dry-run
+nohup .venv-client/bin/python eval/run.py --arm mix60-q30-s240 --arm mix60-q30-s300 > eval-mix60-q30.log 2>&1 &
+nohup .venv-client/bin/python eval/run.py --arm mix60-n9-s300 > eval-mix60-n9.log 2>&1 &   # node B
+nohup .venv-client/bin/python eval/run.py --arm mix60-n3-s300 > eval-mix60-n3.log 2>&1 &   # node C
 ```
 
 ## What to report
