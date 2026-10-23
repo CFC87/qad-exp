@@ -16,6 +16,7 @@ FC = ("SFT-Agentic-v2/tool_calling", "Agentic-v1/tool_calling", "RL-Agentic-Func
 CS_KW = {"tool_max_tokens": 8192, "tool_v2": True, "sim_ctx": 65536, "user_effort": "medium", "tool_effort": "medium",
          "arg_index": str(REPO / "data" / "subsets" / "arg_index_mix_v2.json")}
 CARDS = ["tau2_cut_mt_25k_s20261001/scenario_cards_v2_final.parquet", "tau2_r3_t3_s20261014/customer_cards_fill_v1.parquet",
+         "mix60_cards_s20261023/customer_cards_fill_n9.parquet", "mix60_cards_s20261023/customer_cards_fill_n3.parquet",
          "tau2_r3_t3_s20261014/customer_cards_v3.parquet", "mix60_cards_s20261023/customer_cards_v3_q.parquet",
          "mix60_cards_s20261023/customer_cards_v3_n9.parquet", "mix60_cards_s20261023/customer_cards_v3_n3.parquet",
          "mix60_cards_s20261023/customer_cards_alias.parquet"]

@@ -4,10 +4,13 @@ include = "base.toml"
 deadline_s = 3600               # an episode is stopped this long after its rollout step started (round 4: 1200)
 # Scenario cards (the simulated customer plays from its conversation's card), keyed by prompt_id. A later file's card
 # replaces an earlier file's card for the same conversation; a card that failed its checks replaces nothing. A
-# customer-service row with no card is left out.
+# customer-service row with no card is left out. The fill files hold cards made by the earlier rules for conversations
+# whose newer card failed its checks.
 scenario_cards = [
   "data/subsets/tau2_cut_mt_25k_s20261001/scenario_cards_v2_final.parquet",
   "data/subsets/tau2_r3_t3_s20261014/customer_cards_fill_v1.parquet",
+  "data/subsets/mix60_cards_s20261023/customer_cards_fill_n9.parquet",
+  "data/subsets/mix60_cards_s20261023/customer_cards_fill_n3.parquet",
   "data/subsets/tau2_r3_t3_s20261014/customer_cards_v3.parquet",
   "data/subsets/mix60_cards_s20261023/customer_cards_v3_q.parquet",
   "data/subsets/mix60_cards_s20261023/customer_cards_v3_n9.parquet",

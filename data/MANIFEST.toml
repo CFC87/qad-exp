@@ -101,9 +101,10 @@ path = "data/subsets/mix60_cards_s20261023/customer_cards_v3_q.parquet"
 sha256 = "be34f6abd2c9dc07ea7f6092bee21cadd01b49d558a4dd90ae3638183d119d4e"
 # 2 MB
 
-# TODO before release: the Nemotron customer cards and the alias cards are still being written; add their entries
-# (customer_cards_v3_n9.parquet, customer_cards_v3_n3.parquet, customer_cards_alias.parquet under
-# data/subsets/mix60_cards_s20261023/) with their sha256 when they are final.
+# TODO before release: the Nemotron customer cards, their fill cards and the alias cards are still being written; add
+# their entries (customer_cards_fill_n9.parquet, customer_cards_fill_n3.parquet, customer_cards_v3_n9.parquet,
+# customer_cards_v3_n3.parquet, customer_cards_alias.parquet under data/subsets/mix60_cards_s20261023/) with their sha256
+# when they are final.
 
 [assets."arg_index_mix_v2.json"]
 release = "data-v3"
