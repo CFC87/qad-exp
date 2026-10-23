@@ -72,6 +72,10 @@ TRANSFER_TOOL = re.compile(r'^(?!(get|check|list|view|lookup|search|find|fetch|r
                           r'|(initiate_|request_)?transfer_to_(?!((savings_|checking_)?(account|wallet|bank|card|fund|ticket|point)s?'
                           r'(_account)?)$)\w+'
                           r'|.*human\w*transfer|.*human_agent)', re.I)  # not check_claim_escalation
+# the earlier handoff rule, kept for the environments without tool_v2 so the replayed function-calling environment and
+# the round-4 configurations behave as before (a role handoff such as transfer_to_specialist does not end their episodes)
+TRANSFER_TOOL_T3 = re.compile(r'^(?!(get|check|list|view|lookup|search|find|fetch|read|query|retrieve)_)'
+                              r'.*(transfer.*(human|agent|representative)|escalat)', re.I)
 READ_TOOL = re.compile(r'^(get|find|list|search|check|lookup|look_up|view|fetch|read|query|retrieve|calculate|compute|'
                        r'validate|verify|show|describe|count|estimate|compare|think)(_|[A-Z]|$)')
 
@@ -514,7 +518,7 @@ def _result_values(text):
 def _is_write(call, result):
     """a call that changes the backend's state: not read-like by name, not a transfer, and it did not fail"""
     name = str((call.get('function') or call).get('name') or '')
-    return not READ_TOOL.search(name) and not TRANSFER_TOOL.search(name) and not _is_error(result)
+    return not READ_TOOL.search(name) and not TRANSFER_TOOL_T3.search(name) and not _is_error(result)
 
 
 def parse_assistant(text):
@@ -3655,6 +3659,8 @@ async def run_episode(gen, tok, msgs, tools, *, window, cap, tkw=None, mode='las
     generation or simulator error ends it too. In mode each the finished turns are kept (valid states, already
     generated); in cut / last the episode gives no sample."""
 
+    transfer_re = TRANSFER_TOOL if (sim_kw or {}).get('tool_v2') else TRANSFER_TOOL_T3  # the earlier rule without tool_v2
+
     async def within(coro):  # await coro, but not past the deadline (a timeout of the call itself stays an error)
         if deadline is None:
             return await coro
@@ -3745,7 +3751,7 @@ async def run_episode(gen, tok, msgs, tools, *, window, cap, tkw=None, mode='las
         if not ok:
             why = 'unparsable or empty reply'
             break
-        if any(TRANSFER_TOOL.search((c.get('function') or {}).get('name') or '') for c in msg.get('tool_calls') or []):
+        if any(transfer_re.search((c.get('function') or {}).get('name') or '') for c in msg.get('tool_calls') or []):
             why = 'transfer call'  # the decision to transfer is trained; what follows it is not
             break
         if is_target:

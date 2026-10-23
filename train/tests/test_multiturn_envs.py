@@ -389,6 +389,15 @@ async def main():
                                    sim=FakeSim(fail=True))
     assert info['ended'].startswith('dropped: env error') and len(s) == 2, (info['ended'], len(s))
     print('failure ok:', info['ended'])
+    # without tool_v2 the handoff rule is the earlier one, so a role handoff (transfer_to_specialist) does not end a
+    # replay_tools episode (tool_v2 ends it: TRANSFER_TOOL)
+    XFER = '<think>\nhand off\n</think>\n\n<tool_call>\n{"name": "transfer_to_specialist", "arguments": {}}\n</tool_call><|im_end|>'
+    gen, seen = scripted([XFER, TXT('A specialist will call you.'), TXT('Order 2 is pending.'), TXT('Bye!')])
+    s, info = await MT.run_episode(gen, tok, MSGS, TOOLS, window=40960, cap=4096, mode='each', env='replay_tools', sim=FakeSim())
+    assert info['ended'] == 'complete' and len(s) == 4, (info['ended'], len(s))
+    assert MT.TRANSFER_TOOL.search('transfer_to_specialist') and not MT.TRANSFER_TOOL_T3.search('transfer_to_specialist')
+    assert MT.TRANSFER_TOOL_T3.search('transfer_to_human_agents') and not MT._is_write({'name': 'transfer_to_human_agents'}, '{}')
+    print('legacy handoff ok:', info['ended'], len(s))
     print('multi-turn env tests passed')
 
 asyncio.run(main())
