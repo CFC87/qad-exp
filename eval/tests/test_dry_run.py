@@ -12,6 +12,10 @@
    YaRN, server flags, parsers and plugins, prefix caching, first-request sampling / prompts / add_special_tokens / caps,
    tau2 commands and agent sampling, BFCL handler and first request, alternating tau2 lanes), a --model mismatch refused,
    and the scheduling loop passing --model and --api-lane to the phase runner.
+5. Evaluation spec v2 of the other models (no tokenizer needed): Qwen3-8B's samples per question (competitions and GPQA
+   Diamond 16, LiveCodeBench v6 8) with each model's own caps; a benchmark file made under v1 (stamped k, or unstamped)
+   is moved to <arm>/superseded/k<old>/ and its stamp rewritten for v2, a current one is kept; a phase whose status was
+   written for the v1 tasks (or has no tasks field) is not complete (run.py and summary.py), one for the current tasks is.
     .venv-client/bin/python eval/tests/test_dry_run.py [--tokenizer-from DIR] [--tokenizer-dir MODEL=DIR ...]
 Tokenizer source: --tokenizer-from, else models/Qwen3-8B; other models: --tokenizer-dir, else models/<BF16 or NVFP4 dir>.
 """
@@ -300,6 +304,47 @@ def main():
                 sorted([("o0", "T", model, "1"), ("o0", "S1", model, None), ("o1", "T", model, "2"), ("o1", "S1", model, None)]),
                 str(sorted((r["arm"], r["phase"], r["model"], r["lane"]) for r in runs)))
         os.environ.pop("QADX_API_KEY_2", None)
+    # 5. evaluation spec v2 of the other models
+    import phases as P
+    import summary as SUM
+    res5 = tmp / "results_spec"
+    RP.RES = res5
+    for model in OTHER:
+        tbl, v1 = P.table(model), P.MODEL_V1_TASKS[model]
+        kc = {sp.split(":")[0]: (int(sp.split(":")[1]), int(sp.split(":")[2])) for ph in tbl for sp in P.specs(ph, model)}
+        k1 = {sp.split(":")[0]: (int(sp.split(":")[1]), int(sp.split(":")[2])) for ph in v1 for sp in v1[ph].split(",")}
+        want_k = {b: 16 for b in P.COMPS_ORDER} | {"gpqa_diamond": 16, "lcb_v6": 8} | ({"lcb_pro": 8} if "S4" in tbl else {})
+        rep.add(f"{model}: spec v2, samples per question as Qwen3-8B's, caps as in v1",
+                P.spec_version(model) == 2 and all(kc[b][0] == k for b, k in want_k.items()) and sorted(v1) == ["G", "S1", "S3"]
+                and all(k1[b][0] == (4 if b == "lcb_v6" else 8) and k1[b][1] == kc[b][1] for b in k1)
+                and all(P.v1_k(b, kc[b][0], model) == k1.get(b, kc[b])[0] for b in kc), json.dumps(kc))
+        RP.set_model(model)
+        arm = f"spec-{model}"
+        d = res5 / arm
+        d.mkdir(parents=True)
+        (d / "arm.json").write_text(json.dumps({"model": model}))
+        for b, stamp in (("aime26", {"k": 8, "spec_version": 1, "model": model}), ("gpqa_diamond", None),
+                         ("lcb_v6", {"k": 8, "spec_version": 2, "model": model})):
+            (d / f"{b}.jsonl").write_text("")
+            (d / f"{b}.grades.jsonl").write_text("")
+            if stamp:
+                (d / f"{b}.spec").write_text(json.dumps(stamp) + "\n")
+            RP.start_bench(arm, b, kc[b][0])
+        moved = sorted(str(f.relative_to(d / "superseded")) for f in (d / "superseded").rglob("*") if f.is_file())
+        stamps = {b: json.loads((d / f"{b}.spec").read_text()) for b in ("aime26", "gpqa_diamond", "lcb_v6")}
+        rep.add(f"{model}: v1 results (stamped and unstamped) moved to superseded/k8, the current one kept, stamps v2",
+                moved == ["k8/aime26.grades.jsonl", "k8/aime26.jsonl", "k8/aime26.spec", "k8/gpqa_diamond.grades.jsonl",
+                          "k8/gpqa_diamond.jsonl"] and not (d / "aime26.jsonl").exists() and (d / "lcb_v6.jsonl").exists()
+                and all(v == {"k": kc[b][0], "spec_version": 2, "model": model} for b, v in stamps.items()), f"{moved} {stamps}")
+        job = RUN.Job(arm, "ck", "S1", 0, model)
+        comp = {}
+        for name, st in (("v1 tasks", dict(complete=True, tasks=v1["S1"])), ("no tasks field", dict(complete=True)),
+                         ("current tasks", dict(complete=True, tasks=tbl["S1"]["tasks"]))):
+            (d / "S1.status.json").write_text(json.dumps(st))
+            comp[name] = (RUN.phase_complete(res5, job), SUM.arm_summary(res5, arm, model)["phases"]["S1"])
+        rep.add(f"{model}: S1 complete only under the current tasks (run.py and summary.py)",
+                comp == {"v1 tasks": (False, False), "no tasks field": (False, False), "current tasks": (True, True)}, str(comp))
+    RP.set_model("qwen3-8b")
     print(f"work dir {tmp}")
     rep.done()
 

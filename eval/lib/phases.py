@@ -49,21 +49,26 @@ V1_K = {"aime26": 8, "hmmt_feb26": 8, "hmmt_feb25": 8, "hmmt_nov25": 8, "gpqa_di
 
 
 # ------------------------------------------------------------------------------------------------- the other models
-# Qwen3-30B-A3B, Nemotron Nano 9B v2 and Nemotron 3 Nano 30B-A3B: every phase as their reference PTQ / BF16 results were
-# evaluated (eval/reference/baselines.json), so that recovery is read against them. Their samples per question and caps
-# differ from Qwen3-8B's spec v2 on purpose: they are those references' settings. Only the five report categories are
-# run (no IFBench, no MMLU-Redux).
+# Qwen3-30B-A3B, Nemotron Nano 9B v2 and Nemotron 3 Nano 30B-A3B: each model's own caps and windows (those of its
+# reference PTQ / BF16 results, eval/reference/baselines.json), with Qwen3-8B's samples per question. Only the five report
+# categories are run (no IFBench, no MMLU-Redux).
 #
 #   Qwen3-30B-A3B (window 40,960; L with static YaRN x4 at 131,072)
-#     S1  competitions k=8, cap 38,912     G  GPQA Diamond k=8          S3  LiveCodeBench v6 k=4
+#     S1  competitions k=16, cap 38,912    G  GPQA Diamond k=16         S3  LiveCodeBench v6 k=8
 #     S4  LiveCodeBench Pro k=8            L  LongBench Pro k=1 + MRCR k=8
 #     T   tau2 airline + retail + telecom, 4 trials each, one server    B  BFCL multi-turn, 4 replicates
-#   Nemotron Nano 9B v2 (window 131,072, no YaRN): S1 competitions k=8, cap 32,768; G GPQA k=8; S3 LiveCodeBench v6 k=4
-#     (no LiveCodeBench Pro: this model does not follow its C++ instruction); L, T, B as above
+#   Nemotron Nano 9B v2 (window 131,072, no YaRN): S1 competitions k=16, cap 32,768; G GPQA k=16; S3 LiveCodeBench v6
+#     k=8 (no LiveCodeBench Pro: this model does not follow its C++ instruction); L, T, B as above
 #   Nemotron 3 Nano 30B-A3B: S1, G, S3, S4 with cap 131,072 in a 262,144 window (NVIDIA's evaluation budget); L, T, B as
 #     above in a 131,072 window
 # hours: typical wall time on one B200 (server start and generation); tau2 also depends on the API. api_lane "alt": the
 # one tau2 phase of an arm takes API lane 1 or 2 by arm (run.py), so two arms' tau2 phases can run at once with two keys.
+#
+# Evaluation spec v2 of these models (as Qwen3-8B's): the four competitions and GPQA Diamond take 16 samples per question,
+# LiveCodeBench v6 takes 8 (their spec v1: 8, 8 and 4); everything else is unchanged. Results made under v1 are never
+# extended to the new k: run_phase.py moves them to <results>/<arm>/superseded/k<old>/ and generates the benchmark afresh
+# (MODEL_V1_K), and a phase counts as complete only when its status file was written for the current tasks
+# (MODEL_V1_TASKS: the tasks of a status file without a tasks field).
 
 COMPS_ORDER = ("aime26", "hmmt_feb26", "hmmt_feb25", "hmmt_nov25")
 
@@ -77,34 +82,40 @@ _TAU2 = "tau2_airline:4:32768,tau2_retail:4:32768,tau2_telecom:4:32768"
 MODEL_PHASES = {
     "qwen3-8b": PHASES,
     "qwen3-30b-a3b": {
-        "S1": dict(tasks=_comps(8, 38912), concurrency=160, max_model_len=40960, yarn=False, hours=1.0),
-        "G": dict(tasks="gpqa_diamond:8:32768", concurrency=160, max_model_len=40960, yarn=False, hours=0.4),
-        "S3": dict(tasks="lcb_v6:4:32768", concurrency=160, max_model_len=40960, yarn=False, hours=0.5),
+        "S1": dict(tasks=_comps(16, 38912), concurrency=160, max_model_len=40960, yarn=False, hours=2.0),
+        "G": dict(tasks="gpqa_diamond:16:32768", concurrency=160, max_model_len=40960, yarn=False, hours=0.8),
+        "S3": dict(tasks="lcb_v6:8:32768", concurrency=160, max_model_len=40960, yarn=False, hours=1.0),
         "S4": dict(tasks="lcb_pro:8:32768", concurrency=160, max_model_len=40960, yarn=False, hours=1.1),
         "L": dict(tasks=_LONG, concurrency=64, max_model_len=131072, yarn=True, hours=3.5),
         "T": dict(tasks=_TAU2, concurrency=48, max_model_len=40960, yarn=False, hours=2.9, api_lane="alt"),
         "B": dict(tasks="bfcl_mt:4:32768", concurrency=128, max_model_len=40960, yarn=False, hours=1.5),
     },
     "nemotron-nano-9b-v2": {
-        "S1": dict(tasks=_comps(8, 32768), concurrency=160, max_model_len=131072, yarn=False, hours=0.9),
-        "G": dict(tasks="gpqa_diamond:8:32768", concurrency=160, max_model_len=131072, yarn=False, hours=0.8),
-        "S3": dict(tasks="lcb_v6:4:32768", concurrency=160, max_model_len=131072, yarn=False, hours=0.5),
+        "S1": dict(tasks=_comps(16, 32768), concurrency=160, max_model_len=131072, yarn=False, hours=1.8),
+        "G": dict(tasks="gpqa_diamond:16:32768", concurrency=160, max_model_len=131072, yarn=False, hours=1.6),
+        "S3": dict(tasks="lcb_v6:8:32768", concurrency=160, max_model_len=131072, yarn=False, hours=1.0),
         "L": dict(tasks=_LONG, concurrency=64, max_model_len=131072, yarn=False, hours=1.5),
         "T": dict(tasks=_TAU2, concurrency=48, max_model_len=131072, yarn=False, hours=2.9, api_lane="alt"),
         "B": dict(tasks="bfcl_mt:4:32768", concurrency=128, max_model_len=131072, yarn=False, hours=1.5),
     },
     "nemotron-3-nano-30b-a3b": {
-        "S1": dict(tasks=_comps(8, 131072), concurrency=160, max_model_len=262144, yarn=False, hours=1.2),
-        "G": dict(tasks="gpqa_diamond:8:131072", concurrency=160, max_model_len=262144, yarn=False, hours=0.8),
-        "S3": dict(tasks="lcb_v6:4:131072", concurrency=160, max_model_len=262144, yarn=False, hours=0.6),
+        "S1": dict(tasks=_comps(16, 131072), concurrency=160, max_model_len=262144, yarn=False, hours=2.4),
+        "G": dict(tasks="gpqa_diamond:16:131072", concurrency=160, max_model_len=262144, yarn=False, hours=1.6),
+        "S3": dict(tasks="lcb_v6:8:131072", concurrency=160, max_model_len=262144, yarn=False, hours=1.2),
         "S4": dict(tasks="lcb_pro:8:131072", concurrency=160, max_model_len=262144, yarn=False, hours=1.3),
         "L": dict(tasks=_LONG, concurrency=64, max_model_len=131072, yarn=False, hours=0.8),
         "T": dict(tasks=_TAU2, concurrency=48, max_model_len=131072, yarn=False, hours=2.9, api_lane="alt"),
         "B": dict(tasks="bfcl_mt:4:32768", concurrency=128, max_model_len=131072, yarn=False, hours=1.5),
     },
 }
-# Evaluation spec per model: Qwen3-8B's is v2 (above); the other models' protocols are at their first version.
-MODEL_SPEC_VERSION = {"qwen3-8b": SPEC_VERSION, "qwen3-30b-a3b": 1, "nemotron-nano-9b-v2": 1, "nemotron-3-nano-30b-a3b": 1}
+# Evaluation spec per model: v2 for every model (the samples per question of Qwen3-8B's spec v2).
+MODEL_SPEC_VERSION = {"qwen3-8b": SPEC_VERSION, "qwen3-30b-a3b": 2, "nemotron-nano-9b-v2": 2, "nemotron-3-nano-30b-a3b": 2}
+# per model: the spec v1 tasks of the phases v2 changed, and the v1 samples per question of the benchmarks whose k changed
+MODEL_V1_TASKS = {"qwen3-8b": V1_TASKS,
+                  "qwen3-30b-a3b": {"S1": _comps(8, 38912), "G": "gpqa_diamond:8:32768", "S3": "lcb_v6:4:32768"},
+                  "nemotron-nano-9b-v2": {"S1": _comps(8, 32768), "G": "gpqa_diamond:8:32768", "S3": "lcb_v6:4:32768"},
+                  "nemotron-3-nano-30b-a3b": {"S1": _comps(8, 131072), "G": "gpqa_diamond:8:131072", "S3": "lcb_v6:4:131072"}}
+MODEL_V1_K = {m: V1_K for m in MODEL_V1_TASKS}
 DEFAULT_MODEL = "qwen3-8b"
 
 
@@ -121,13 +132,13 @@ def spec_version(model=DEFAULT_MODEL):
 
 
 def v1_tasks(phase, model=DEFAULT_MODEL):
-    """The tasks a status file without a tasks field was written for (spec v1 of Qwen3-8B; no such files otherwise)."""
-    return V1_TASKS.get(phase, PHASES[phase]["tasks"]) if model == DEFAULT_MODEL else None
+    """The tasks a status file without a tasks field was written for: the model's spec v1 tasks of that phase."""
+    return MODEL_V1_TASKS[model].get(phase, MODEL_PHASES[model][phase]["tasks"])
 
 
 def v1_k(bench, k, model=DEFAULT_MODEL):
-    """The k a results file without a .spec stamp was made with (spec v1 of Qwen3-8B; otherwise unstamped = k)."""
-    return V1_K.get(bench, k) if model == DEFAULT_MODEL else k
+    """The k a results file without a .spec stamp was made with: the model's spec v1 k of that benchmark."""
+    return MODEL_V1_K[model].get(bench, k)
 
 
 def specs(phase, model=DEFAULT_MODEL):

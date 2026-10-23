@@ -215,17 +215,18 @@ IFBench fetches its NLTK data on first use; `grade_ifbench.py --selftest` re-gra
 
 ## Other models: Qwen3-30B-A3B, Nemotron Nano 9B v2, Nemotron 3 Nano 30B-A3B
 
-Each of these models is evaluated with exactly the settings of its reference PTQ and BF16 results in
-`eval/reference/baselines.json`, so that its recovery is read against them. Their samples per question and output caps
-are not Qwen3-8B's spec v2: they are those references' settings, and they differ between the models on purpose. Only the
-five report categories run (no IFBench, no MMLU-Redux). Each model's protocol is version 1 (`summary.md` prints
-`evaluation spec <model> v1`).
+Each of these models is evaluated with the output caps and windows of its reference PTQ and BF16 results in
+`eval/reference/baselines.json` (they differ between the models on purpose) and with Qwen3-8B's samples per question
+(spec v2: competitions and GPQA Diamond 16, LiveCodeBench v6 8). Only the five report categories run (no IFBench, no
+MMLU-Redux). Each model's protocol is version 2 (`summary.md` prints `evaluation spec <model> v2`); its version 1 took 8,
+8 and 4 samples, and results made under it are handled as for Qwen3-8B: moved to `<arm>/superseded/k<old>/` and
+generated afresh, never extended.
 
 | Phase | Qwen3-30B-A3B | Nemotron Nano 9B v2 | Nemotron 3 Nano 30B-A3B | Concurrency |
 |---|---|---|---|---|
-| S1 | competitions `:8:38912` | competitions `:8:32768` | competitions `:8:131072` | 160 |
-| G | `gpqa_diamond:8:32768` | `gpqa_diamond:8:32768` | `gpqa_diamond:8:131072` | 160 |
-| S3 | `lcb_v6:4:32768` | `lcb_v6:4:32768` | `lcb_v6:4:131072` | 160 |
+| S1 | competitions `:16:38912` | competitions `:16:32768` | competitions `:16:131072` | 160 |
+| G | `gpqa_diamond:16:32768` | `gpqa_diamond:16:32768` | `gpqa_diamond:16:131072` | 160 |
+| S3 | `lcb_v6:8:32768` | `lcb_v6:8:32768` | `lcb_v6:8:131072` | 160 |
 | S4 | `lcb_pro:8:32768` | — | `lcb_pro:8:131072` | 160 |
 | L | `longbench_pro:1:32768`, `mrcr8:8:32768` | same | same | 64 |
 | T | `tau2_airline:4:32768`, `tau2_retail:4:32768`, `tau2_telecom:4:32768` (one server, the three domains at once) | same | same | 48 per domain |
@@ -271,9 +272,10 @@ nohup .venv-client/bin/python eval/run.py --arm r4-q30-s150 --arm r4-q30-s160 --
 - **tau2 API keys:** each arm's tau2 runs as one phase (T, about 2.9 h). With one key the T phases of a model run one
   after another and are the bottleneck (Qwen3-30B-A3B: 5 x 2.9 h). With `QADX_API_KEY_2` set, the arms alternate
   between the two keys (`(API lane 1)` / `(API lane 2)` in the dry-run plan), so two T phases run at a time.
-- Typical times on 8 B200 GPUs (server start and generation; reference PTQ runs): Qwen3-30B-A3B about 11 GPU-hours per
-  arm (L 3.5 h, T 2.9 h, B 1.5 h, the rest about 3 h); Nemotron Nano 9B v2 about 8 h per arm; Nemotron 3 Nano about 9 h
-  per arm. A model's arms finish in roughly the larger of (GPU-hours / 8) and the tau2 chain.
+- Typical times on 8 B200 GPUs (server start and generation; estimated from reference PTQ runs, the competitions, GPQA
+  and LiveCodeBench v6 at twice their spec-v1 time): Qwen3-30B-A3B about 13 GPU-hours per arm (L 3.5 h, T 2.9 h, B 1.5 h,
+  the rest about 5 h); Nemotron Nano 9B v2 about 10 h per arm; Nemotron 3 Nano about 12 h per arm. A model's arms finish
+  in roughly the larger of (GPU-hours / 8) and the tau2 chain.
 - `--shard`, `--grade-only`, `--limit`, resuming and the outputs work as for Qwen3-8B. `<arm>/arm.json` records the
   model; an arm name cannot be reused for another model or checkpoint.
 
@@ -285,9 +287,9 @@ The **Report** of each model, printed for its arms (one Report per model when ar
 .venv-client/bin/python eval/lib/summary.py --arms r4-n9-s200,r4-n9-s220,r4-n9-s240 --report
 ```
 
-It shows the model's `PTQ (ref)` and `BF16 (ref)` columns from `eval/reference/baselines.json`, the category scores
-(reasoning, code, long, bfcl, tau2), each category's `recovery` = (arm - PTQ) / (BF16 - PTQ), every benchmark score with
-its k, and the `complete + graded` row. Report every row as printed, with the tau2 API-error counts per arm and domain
+It shows the model's `PTQ (ref)` and `BF16 (ref)` columns from `eval/reference/baselines.json` when that file holds them
+for the model's current spec, the category scores (reasoning, code, long, bfcl, tau2), each category's `recovery` =
+(arm - PTQ) / (BF16 - PTQ), every benchmark score with its k, and the `complete + graded` row. Report every row as printed, with the tau2 API-error counts per arm and domain
 (see [tau2 API errors and retries](#tau2-api-errors-and-retries)). Some reference gaps are small (Nemotron Nano 9B v2:
 reasoning 0.8 points; Nemotron 3 Nano: long context 1.1 points, tau2 BF16 below PTQ), so a recovery there is read with
 the scores next to it.

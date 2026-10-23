@@ -154,7 +154,8 @@ conversations of these lists: customer service 52 % `transfer call`, 21 % `compl
 ## Evaluation
 
 On the same node, after its chains are done, as in `experiments/round4/README.md` ("Evaluation"), with the mix60
-exports:
+exports. They are evaluated with the current samples per question of `eval/README.md` (competitions and GPQA Diamond 16,
+LiveCodeBench v6 8); round-4 results made with the earlier counts are not compared with them.
 
 ```bash
 .venv-client/bin/python eval/run.py --arm mix60-q30-s240 --arm mix60-q30-s300 --dry-run
