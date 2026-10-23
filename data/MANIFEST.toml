@@ -89,6 +89,16 @@ release = "data-v3"
 path = "data/subsets/tau2_r3_t3_s20261014/customer_cards_fill_v1.parquet"
 sha256 = "6246518296c75af6715baa3b9a1eac43b967c87b9075fbf8440e418a555eaa34"
 
+[assets."mix60_cards_s20261023.customer_cards_fill_n9.parquet"]
+release = "data-v3"
+path = "data/subsets/mix60_cards_s20261023/customer_cards_fill_n9.parquet"
+sha256 = "2265b6884270c84b93ae892355faadc6f5230c5bef072daf4adbb48f0aacc440"
+
+[assets."mix60_cards_s20261023.customer_cards_fill_n3.parquet"]
+release = "data-v3"
+path = "data/subsets/mix60_cards_s20261023/customer_cards_fill_n3.parquet"
+sha256 = "8f03782c9d3504d91c2074ab184bcd6bf29e78a099217f3d169bf4e32ab586b3"
+
 [assets."tau2_r3_t3_s20261014.customer_cards_v3.parquet"]
 release = "data-v3"
 path = "data/subsets/tau2_r3_t3_s20261014/customer_cards_v3.parquet"
@@ -101,10 +111,23 @@ path = "data/subsets/mix60_cards_s20261023/customer_cards_v3_q.parquet"
 sha256 = "be34f6abd2c9dc07ea7f6092bee21cadd01b49d558a4dd90ae3638183d119d4e"
 # 2 MB
 
-# TODO before release: the Nemotron customer cards, their fill cards and the alias cards are still being written; add
-# their entries (customer_cards_fill_n9.parquet, customer_cards_fill_n3.parquet, customer_cards_v3_n9.parquet,
-# customer_cards_v3_n3.parquet, customer_cards_alias.parquet under data/subsets/mix60_cards_s20261023/) with their sha256
-# when they are final.
+[assets."mix60_cards_s20261023.customer_cards_v3_n9.parquet"]
+release = "data-v3"
+path = "data/subsets/mix60_cards_s20261023/customer_cards_v3_n9.parquet"
+sha256 = "2522dbff55ac6aa6ff4b48c6c499882ec73c1a47a0e41dc031891170a3eb8a49"
+# 3 MB
+
+[assets."mix60_cards_s20261023.customer_cards_v3_n3.parquet"]
+release = "data-v3"
+path = "data/subsets/mix60_cards_s20261023/customer_cards_v3_n3.parquet"
+sha256 = "6b26b54f77fdc0c48a60ee675e4e8553d4380220bea451b1674955f6f22ca395"
+# 2 MB
+
+[assets."mix60_cards_s20261023.customer_cards_alias.parquet"]
+release = "data-v3"
+path = "data/subsets/mix60_cards_s20261023/customer_cards_alias.parquet"
+sha256 = "f5804be3295d0a5904c2949c4e692c7ef95763719189cd60a7d6bb4e1995b401"
+# the cards of conversations that appear in more than one list, under the other lists' prompt ids
 
 [assets."arg_index_mix_v2.json"]
 release = "data-v3"
