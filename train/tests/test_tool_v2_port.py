@@ -1168,5 +1168,25 @@ class Endings(unittest.TestCase):
             self.assertFalse(mt.TRANSFER_TOOL.search(n), n)
 
 
+class LegacyIdRule(unittest.IsolatedAsyncioTestCase):
+    """the environments without tool_v2 (replay_tools function calling) keep the earlier id rule, under which a number
+    with a unit word ("30-day") is an id a rewrite must keep; tool_v2 still skips those words"""
+
+    def test_id_tokens_flag(self):
+        self.assertIn('30-day', mt.id_tokens('Please get the 30-day forecast.', skip_units=False))
+        self.assertNotIn('30-day', mt.id_tokens('Please get the 30-day forecast.'))
+
+    async def test_legacy_replay_rejects_changed_unit_number(self):
+        async def rewrite(*args, **kwargs):
+            return 'Please get the 90-day forecast.'
+        msgs = [{'role': 'user', 'content': 'Hello'}, {'role': 'assistant', 'content': 'Hi'},
+                {'role': 'user', 'content': 'Please get the 30-day forecast.'}]
+        e = mt.ReplayUserEnv(msgs, [], rewrite, tool_max_tokens=8192)
+        out = await e.next_messages(0, {'role': 'assistant', 'content': 'Next?'},
+                                    [{'role': 'user', 'content': 'Hello'}, {'role': 'assistant', 'content': 'Next?'}])
+        self.assertEqual(out, [{'role': 'user', 'content': 'Please get the 30-day forecast.'}])
+        self.assertEqual(e.counts.get('user_adapt_rejected'), 1)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -1258,15 +1258,17 @@ def _ntxt(x):
 _IDTOK = re.compile(r'[A-Za-z0-9#@._+-]*\d[A-Za-z0-9#@._+-]*')
 
 
-def id_tokens(text):
+def id_tokens(text, skip_units=True):
     """id-like tokens of a text: letters and digits (>= 5 characters), e-mail addresses, or >= 6 digits; not a number
     with lower-case unit words ("30-day", "2-3-sentence", "100-per-night": in a test run, a user asking for the 30-day
-    forecast was refused three times as inventing an identifier and the episode ended)"""
+    forecast was refused three times as inventing an identifier and the episode ended). skip_units=False: the earlier
+    rule (the unit words count), for the environments without tool_v2 (otherwise the replay adaptation would accept a
+    rewrite of "30-day" to "90-day")"""
     out = set()
     for t in _IDTOK.findall(text or ''):
         t = t.strip('.,;:!?()[]"\'*')
         n = _ntxt(t)
-        if re.fullmatch(r'\d+(?:[.,]\d+)?(?:[-\u2013/]\d+(?:[.,]\d+)?)?(?:[-\u2013][a-z]+)+', t):
+        if skip_units and re.fullmatch(r'\d+(?:[.,]\d+)?(?:[-\u2013/]\d+(?:[.,]\d+)?)?(?:[-\u2013][a-z]+)+', t):
             continue
         if (len(n) >= 5 and re.search(r'[a-z@]', n)) or len(re.sub(r'\D', '', t)) >= 6:
             out.add(t)
@@ -1765,7 +1767,7 @@ class SimEnv:
                 out = re.sub(r'^\s*\**\s*(agent|representative|assistant)\s*\**\s*:\s*', '', out, flags=re.I)
         if card:  # a made-up id (3.5 % of customer messages stated one): resample once, then keep
             seen = _ntxt(card) + _ntxt([x.get('content') or '' for x in conv])
-            if any(_ntxt(t) not in seen for t in id_tokens(out)):
+            if any(_ntxt(t) not in seen for t in id_tokens(out, skip_units=False)):
                 self.counts['user_resampled'] = self.counts.get('user_resampled', 0) + 1
                 out = _plain((await self._sim(m, self.max_tokens, self.user_effort)).strip())
                 if self.tool_v2:
@@ -3552,7 +3554,7 @@ class ReplayUserEnv:
             # v2: ids of items the student never showed may go (whole-word match: an id sharing digits with an unseen
             # value is not exempt); the planned message compared after the same character normalization as the rewrite
             # (the counter had counted hyphen swaps as rewrites); shorter allowed then
-            keep = [t for t in id_tokens(p) if not any(_wtxt(t) in _wtxt(v) or _wtxt(v) in _wtxt(t) for v in unseen)]
+            keep = [t for t in id_tokens(p, skip_units=self.v2) if not any(_wtxt(t) in _wtxt(v) or _wtxt(v) in _wtxt(t) for v in unseen)]
             base = _plain(p) if self.v2 else p
             lo = 0.4 if unseen else 0.6
             note = ''
@@ -3589,7 +3591,7 @@ class ReplayUserEnv:
                     nums = lambda x: set(re.findall(r'(?<![\w.])\d+(?:\.\d+)?(?![\w.])', x))
                     ok_nums = nums(p) - set().union(*[nums(v) for v in unseen]) <= nums(out)
                 else:
-                    ok_ids = not (any(_ntxt(t) not in _ntxt(out) for t in keep) or any(_ntxt(t) not in ctx for t in id_tokens(out)))
+                    ok_ids = not (any(_ntxt(t) not in _ntxt(out) for t in keep) or any(_ntxt(t) not in ctx for t in id_tokens(out, skip_units=False)))
                     ok_nums = True
                 if out and out != base and not voice and not kept_all and ok_ids and ok_nums and not (
                         len(out) > 1.5 * len(p) + 150 or len(out) < lo * len(p)):
