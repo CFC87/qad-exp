@@ -8,7 +8,8 @@ B. The real controller against a mock vLLM and a mock trainer (as test_rollout_s
    2. branches at step 5 (5 % VAL_EVERY != 0) and at step 4 (a validation step): the ledger is cut, a new controller
       starts at that step, the mock trainer resumes there and runs to step 8.
    Checks: the branch draws from the parent's position (its first prompt at the start step is the parent's, the
-   prompts the parent gave back at the step before are drawn again), no prompt is trained twice along the lineage
+   prompts the parent gave back at the step before are drawn again, at the start step or, when they are more than that
+   step draws, later; none is used up untrained), no prompt is trained twice along the lineage
    (parent before the start + branch after it), every trained rank is a training rank, the validations continue
    without gaps or repeats, the cumulative totals continue.
     ../.venv-client/bin/python tests/test_branch_ledger.py
@@ -210,7 +211,14 @@ async def part_b():
         back = set(next(r for r in ledger.latest_attempt(ledger.read(parent + '/steps.jsonl'))
                         if r.get('route') == 'pack' and r['step'] == B - 1).get('requeued_ranks') or ())
         assert min(r['rank'] for r in cb) == min(r['rank'] for r in pb), 'first prompt at step %d differs' % B
-        assert back <= {r['rank'] for r in cb}, 'prompts given back at step %d not drawn again: %s' % (B - 1, back - {r['rank'] for r in cb})
+        # a prompt given back comes again in a later step (rollout.py), in rank order before any new prompt: at step B
+        # unless the backlog of given-back prompts is larger than step B draws; it is never used up without training
+        miss = back - {r['rank'] for r in cb}
+        later = {r['rank'] for r in ledger.read(child + '/rollouts.jsonl') if r.get('route') == 'pack' and r['step'] > B}
+        used_end = ledger.used_ranks(child, 9)
+        assert all(m in later or m not in used_end for m in miss), \
+            'prompts given back at step %d neither drawn later nor still unused: %s' % (B - 1, sorted(m for m in miss if m not in later and m in used_end))
+        assert not miss or min(miss) > min(r['rank'] for r in cb), 'a given-back prompt was skipped for a higher rank at step %d' % B
         cs = [r for r in ledger.read(child + '/steps.jsonl')]
         ve = [r['step'] for r in cs if r.get('route') == 'val']
         assert sorted(ve) == list(range(len(ve))) and len(set(ve)) == len(ve), 'validations %s' % ve
