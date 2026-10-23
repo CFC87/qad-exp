@@ -1,0 +1,10 @@
+# Short check of the n9 path before its run (start checkpoint, weight pushes, multi-turn simulator, memory): one
+# 2-step segment on the same list. Not a result.
+include = "n9.toml"
+name = "smoke-mix60-n9"
+budgets = [2]
+decays = [1]
+warmup = 1
+eval_every = 2
+val_n = 32
+keep_weights = []

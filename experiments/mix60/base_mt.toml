@@ -1,0 +1,67 @@
+# base.toml plus the multi-turn environment of the lists with customer-service conversations (every mix60 list except
+# Qwen3-30B-A3B's long-context stage 2). This file is the only place the environment is set.
+include = "base.toml"
+deadline_s = 3600               # an episode is stopped this long after its rollout step started (round 4: 1200)
+# Scenario cards (the simulated customer plays from its conversation's card), keyed by prompt_id. A later file's card
+# replaces an earlier file's card for the same conversation; a card that failed its checks replaces nothing. A
+# customer-service row with no card is left out.
+scenario_cards = [
+  "data/subsets/tau2_cut_mt_25k_s20261001/scenario_cards_v2_final.parquet",
+  "data/subsets/tau2_r3_t3_s20261014/customer_cards_fill_v1.parquet",
+  "data/subsets/tau2_r3_t3_s20261014/customer_cards_v3.parquet",
+  "data/subsets/mix60_cards_s20261023/customer_cards_v3_q.parquet",
+  "data/subsets/mix60_cards_s20261023/customer_cards_v3_n9.parquet",
+  "data/subsets/mix60_cards_s20261023/customer_cards_v3_n3.parquet",
+  "data/subsets/mix60_cards_s20261023/customer_cards_alias.parquet",
+]
+
+# Customer service, played end to end: the simulator acts the customer from the scenario card and the tools in a closed
+# world (results checked by program rules and a review, resampled when they fail), the tool calls' argument errors as
+# the recordings of the list show them (arg_index).
+[multiturn."SFT-Agentic-v2/interactive_agent"]
+env = "sim"
+mode = "each"
+require_card = true
+log = true
+cost_prior = 6.6
+sim_kw = { tool_v2 = true, sim_ctx = 65536, user_effort = "medium", tool_effort = "medium", arg_index = "data/subsets/arg_index_mix_v2.json" }
+
+[multiturn."Agentic-v1/interactive_agent"]
+env = "sim"
+mode = "each"
+require_card = true
+log = true
+cost_prior = 7.8
+sim_kw = { tool_v2 = true, sim_ctx = 65536, user_effort = "medium", tool_effort = "medium", arg_index = "data/subsets/arg_index_mix_v2.json" }
+
+[multiturn."RL-Agentic-Conversational-Tool-Use-Pivot-v1"]
+env = "sim"
+mode = "each"
+require_card = true
+log = true
+cost_prior = 5.4
+sim_kw = { tool_v2 = true, sim_ctx = 65536, user_effort = "medium", tool_effort = "medium", arg_index = "data/subsets/arg_index_mix_v2.json" }
+
+# Function calling inside the customer-service portion: user turns replayed, tool results simulated (as round 4). The
+# function-calling portion (subset *_b1) matches no key and is trained single turn at its cut.
+[multiturn."SFT-Agentic-v2/tool_calling"]
+env = "replay_tools"
+mode = "each"
+log = true
+cost_prior = 6.7
+
+[multiturn."Agentic-v1/tool_calling"]
+env = "replay_tools"
+mode = "each"
+log = true
+cost_prior = 8.3
+
+[multiturn."RL-Agentic-Function-Calling-Pivot-v1"]
+env = "replay_tools"
+mode = "each"
+log = true
+cost_prior = 7.8
+
+[simulator]                     # multi-turn user / tool simulator
+model = "openai/gpt-oss-120b"   # the endpoint id of gpt-oss-120b; override with QADX_SIM_MODEL
+reasoning_effort = "low"        # per call; the customer-service entries ask for medium on their customer and tool calls (sim_kw)

@@ -1,0 +1,23 @@
+# Qwen3-30B-A3B, stage 2 of 2: long context with YaRN x4 (window 131,072), 60 steps from stage 1's step-240 weights (a
+# new optimizer and schedule), WSD decay over the last 15; weights exported at 30 and 60 as mix60-q30-s270 / s300. The
+# long-context list is round 4's stage-2 list (the same file: long context was already at 60 steps there).
+include = "base.toml"
+name = "mix60-q30-long"
+export_prefix = "mix60-q30"
+export_offset = 240
+init_from = "mix60-q30-s240"            # stage 1's segment (same --out)
+model = "Qwen3-30B-A3B"
+checkpoint = "Qwen3-30B-A3B-NVFP4"
+subset = "mix_r4_s2_long_q30_s20261021"
+rope = "yarn"
+window = 131072
+budgets = [60]
+decays = [15]
+keep_weights = [30]
+lr = 1e-5
+min_lr = 1e-6
+val_n = 187
+expected_json = "train/configs/expected_bench_8b.json"
+
+[optimizer_overrides]
+1node = { use_precision_aware_optimizer = true, optimizer_cpu_offload = true, optimizer_offload_fraction = 0.7, overlap_cpu_optimizer_d2h_h2d = true }

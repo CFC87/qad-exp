@@ -1,5 +1,5 @@
 # Training data: GitHub release assets of this repository, fetched by `setup/setup.sh data`. An asset is fetched from
-# the release `release` names, its own `release` when it has one (data-v2: the round-4 lists).
+# the release `release` names, its own `release` when it has one (data-v2: the round-4 lists; data-v3: the mix60 lists).
 release = "data-v1"
 repo = "CFC87/qad-exp"
 # Each asset is checked against its sha256 and placed at `path`.
@@ -61,3 +61,52 @@ release = "data-v2"
 path = "data/subsets/tau2_cut_mt_25k_s20261001/scenario_cards_v2_final.parquet"
 sha256 = "0712753a32df33d14983bc776f35340b09050f3f9367140ea38a71e0577a88e5"
 # 12 MB
+
+# mix60 (experiments/mix60): the lists of Qwen3-30B-A3B (stage 1; stage 2 is round 4's stage-2 list), Nemotron Nano 9B v2
+# and Nemotron 3 Nano, the customer cards of their customer-service conversations (base_mt.toml loads them in this
+# order after tau2_cut_mt_25k_s20261001's cards), and the argument index of the customer-service environment
+
+[assets."mix60_s1_q30_s20261023.parquet"]
+release = "data-v3"
+path = "data/subsets/mix60_s1_q30_s20261023/subset.parquet"
+sha256 = "6228855200ad5e691fadd042b0274e4b61f7e07ce2a0502a16f6950beaa906ec"
+# 336 MB
+
+[assets."mix60_n9_s20261023.parquet"]
+release = "data-v3"
+path = "data/subsets/mix60_n9_s20261023/subset.parquet"
+sha256 = "e070a074016ecff5b6020026e55007333cc2c142ed4629ce1347be54edecaf5a"
+# 503 MB
+
+[assets."mix60_n3_s20261023.parquet"]
+release = "data-v3"
+path = "data/subsets/mix60_n3_s20261023/subset.parquet"
+sha256 = "d11cebb4b46209ab6ba2e9686edeb045d1592aed4a6ec2e6a2c3f7fe3d15b76a"
+# 482 MB
+
+[assets."tau2_r3_t3_s20261014.customer_cards_fill_v1.parquet"]
+release = "data-v3"
+path = "data/subsets/tau2_r3_t3_s20261014/customer_cards_fill_v1.parquet"
+sha256 = "6246518296c75af6715baa3b9a1eac43b967c87b9075fbf8440e418a555eaa34"
+
+[assets."tau2_r3_t3_s20261014.customer_cards_v3.parquet"]
+release = "data-v3"
+path = "data/subsets/tau2_r3_t3_s20261014/customer_cards_v3.parquet"
+sha256 = "c4300dea2f903dcbbeb3ea1e66e5273dd9bfd4a10e0e271c777377f13f307f30"
+# 2 MB
+
+[assets."mix60_cards_s20261023.customer_cards_v3_q.parquet"]
+release = "data-v3"
+path = "data/subsets/mix60_cards_s20261023/customer_cards_v3_q.parquet"
+sha256 = "be34f6abd2c9dc07ea7f6092bee21cadd01b49d558a4dd90ae3638183d119d4e"
+# 2 MB
+
+# TODO before release: the Nemotron customer cards and the alias cards are still being written; add their entries
+# (customer_cards_v3_n9.parquet, customer_cards_v3_n3.parquet, customer_cards_alias.parquet under
+# data/subsets/mix60_cards_s20261023/) with their sha256 when they are final.
+
+[assets."arg_index_mix_v2.json"]
+release = "data-v3"
+path = "data/subsets/arg_index_mix_v2.json"
+sha256 = "468c6d357ada882c51af775c26c263df91b95f3bb2faf528c1fe0b00307d37c7"
+# 10 MB; the recorded calls of the function-calling and customer-service lists per tool and parameter schema

@@ -312,8 +312,13 @@ class Chain:
             m = dict(m)
             m["sim"] = {"url": thr_urls, "model": os.environ.get("QADX_SIM_MODEL", c["simulator"]["model"]),
                         "extra": {"reasoning_effort": c["simulator"]["reasoning_effort"]}, "timeout": 300}
-            m["sim_kw"] = {"tool_max_tokens": 8192}
-            m["deadline_s"] = 1200
+            # the entry's own environment settings (multiturn.py sim_kw, e.g. tool_v2), over the tool-result cap; an
+            # arg_index is a data file of this repository
+            kw = dict(m.get("sim_kw") or {})
+            if kw.get("arg_index"):
+                kw["arg_index"] = str(REPO / kw["arg_index"])
+            m["sim_kw"] = {"tool_max_tokens": 8192, **kw}
+            m["deadline_s"] = c.get("deadline_s", 1200)   # an episode stops this long after its step started
             mt[key] = m
         cards = [str(REPO / p) for p in c.get("scenario_cards", [])]
         cfg = dict(vllm=urls, model="student", W=131072, window=c["window"], n_packs=c["n_packs"], max_packs=c["gbs"],
@@ -422,6 +427,13 @@ class Chain:
             self.die(f"no PTQ student {self.out / 'train' / self.ptq}: run `prepare` first")
         if not (self.subset / "subset.parquet").exists():
             self.die(f"no subset {self.subset} (setup/setup.sh data)")
+        # the controller skips a missing card file without a word, and a customer-service row without its card is
+        # dropped, so every listed data file must be there
+        data = list(self.cfg.get("scenario_cards", [])) + [m["sim_kw"]["arg_index"] for m in (self.cfg.get("multiturn") or {}).values()
+                                                           if (m.get("sim_kw") or {}).get("arg_index")]
+        missing = sorted({p for p in data if not (REPO / p).exists()})
+        if missing:
+            self.die(f"missing data files {missing} (setup/setup.sh data)")
         busy = sh("nvidia-smi --query-compute-apps=pid --format=csv,noheader | wc -l", capture=True, shell=True).strip()
         if busy != "0":
             self.die(f"GPUs of this node are in use ({busy} processes)")

@@ -9,4 +9,5 @@ __pycache__/
 /data/**/*.parquet
 /data/**/*.jsonl
 /data/**/*.jsonl.gz
+/data/subsets/arg_index_*.json
 /out/

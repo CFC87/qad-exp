@@ -1,0 +1,18 @@
+# Nemotron 3 Nano 30B-A3B: all five domains in one run (window 131,072), 300 steps, WSD decay over the last 50; weights
+# exported at 250, 280 and 300 (mix60-n3-s250 / s280 / s300). Learning rate as NVIDIA's QAD of this model.
+include = "base_mt.toml"
+name = "mix60-n3"
+model = "NVIDIA-Nemotron-3-Nano-30B-A3B-BF16"
+checkpoint = "NVIDIA-Nemotron-3-Nano-30B-A3B-PTQ-NVFP4-nvscale"   # built by `prepare` (train/prep/build_ptqs.py)
+subset = "mix60_n3_s20261023"
+window = 131072
+budgets = [300]
+decays = [50]
+keep_weights = [250, 280]
+lr = 1e-5
+min_lr = 1e-6
+val_n = 300
+expected_json = "train/configs/expected_n3.json"
+
+[optimizer_overrides]
+1node = { use_precision_aware_optimizer = true, optimizer_cpu_offload = true, optimizer_offload_fraction = 0.7, overlap_cpu_optimizer_d2h_h2d = true }

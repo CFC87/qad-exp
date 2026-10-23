@@ -7,9 +7,9 @@ whose protocol it runs. The model is read from the checkpoint's config (model ty
 Built-in arms point at the pinned downloads under models/ (env/versions.toml):
     bf16   Qwen/Qwen3-8B                (upper reference)
     nvfp4  nvidia/Qwen3-8B-NVFP4        (NVIDIA's post-training quantization: the PTQ baseline QAD starts from)
-The reference arms of the other three models (REFERENCE_ARMS) and the round-4 exports (EXPORTS, under out/exports/) are
-registered by name as well. Any other arm is given as NAME=PATH, e.g. a QAD checkpoint exported to Hugging Face NVFP4
-format.
+The reference arms of the other three models (REFERENCE_ARMS) and the exports of round 4 and mix60 (EXPORTS, under
+out/exports/) are registered by name as well. Any other arm is given as NAME=PATH, e.g. a QAD checkpoint exported to
+Hugging Face NVFP4 format.
 
 Per model (MODELS):
     sampling           completion benchmarks (each model card's thinking-mode setting)
@@ -110,11 +110,15 @@ REFERENCE_ARMS = {
                                 "n3-ptq": "NVIDIA-Nemotron-3-Nano-30B-A3B-PTQ-NVFP4-nvscale"},
 }
 
-# Round-4 exports (experiments/round4): <name> -> model; the checkpoint is out/exports/<name> unless given as NAME=PATH.
+# Exports of experiments/round4 and experiments/mix60: <name> -> model; the checkpoint is out/exports/<name> unless given
+# as NAME=PATH.
 EXPORTS_DIR = paths.REPO / "out" / "exports"
 EXPORTS = {**{f"r4-q30-s{s}": "qwen3-30b-a3b" for s in (150, 160, 180, 210, 240)},
            **{f"r4-n9-s{s}": "nemotron-nano-9b-v2" for s in (200, 220, 240)},
-           **{f"r4-n3-s{s}": "nemotron-3-nano-30b-a3b" for s in (200, 220, 240)}}
+           **{f"r4-n3-s{s}": "nemotron-3-nano-30b-a3b" for s in (200, 220, 240)},
+           **{f"mix60-q30-s{s}": "qwen3-30b-a3b" for s in (200, 220, 240, 270, 300)},
+           **{f"mix60-n9-s{s}": "nemotron-nano-9b-v2" for s in (250, 280, 300)},
+           **{f"mix60-n3-s{s}": "nemotron-3-nano-30b-a3b" for s in (250, 280, 300)}}
 
 
 def model_id(name):

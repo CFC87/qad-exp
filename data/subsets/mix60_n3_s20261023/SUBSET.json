@@ -1,0 +1,53 @@
+{
+ "name": "mix60_n3_s20261023",
+ "model": "NVIDIA-Nemotron-3-Nano-30B-A3B-BF16",
+ "stage": "one run (window 131,072): all five domains",
+ "description": "mix60 list: all five domains",
+ "train_ranks": [
+  0,
+  69647
+ ],
+ "val_ranks": [
+  69647,
+  69947
+ ],
+ "validation": "300 single-turn prompts shared by every list (ranks val_ranks)",
+ "length_col": "len_n3",
+ "steps_of_data": {
+  "reasoning": 60,
+  "code": 60,
+  "bfcl": 60,
+  "tau2": 60,
+  "long": 60
+ },
+ "rows": {
+  "reasoning": 18568,
+  "code": 13348,
+  "bfcl": 17347,
+  "tau2": 4607,
+  "long": 9445
+ },
+ "buffer_rows": {
+  "reasoning": 1857,
+  "code": 1335,
+  "bfcl": 1735,
+  "tau2": 461,
+  "long": 944
+ },
+ "packed_tokens_target": {
+  "reasoning": 259840964,
+  "code": 258842136,
+  "bfcl": 233406040,
+  "tau2": 273766828,
+  "long": 239834180
+ },
+ "packed_tokens_estimate": {
+  "reasoning": 259850438,
+  "code": 258847307,
+  "bfcl": 233427755,
+  "tau2": 273824309,
+  "long": 239835409
+ },
+ "columns": "mix_domain (reasoning / code / bfcl / tau2 / long / val), mix_part (main / buffer), mix_src_rank (rank in its source list)",
+ "rule": "mix60: every domain at 60 steps of data. Five domains as in round 4: reasoning (math competition / StackExchange, plus a fixed science part), competitive-programming code (hard original problems once each, plus infinibyte problems 70 % long / 30 % short by reference answer length; the hardest tier of original problems left out), multi-turn function calling (cut at an assistant turn, one generated turn, history supervised), multi-turn customer service played end to end (with 10 % long math reasoning rows), and long-context documents / retrieval. Changes from round 4, each keeping the selection method per model rather than the rows: function calling and customer service at 60 steps (round 4: 30); the function-calling list continued past its first 20,000 rows in its own weighted order with up to 80 rows per tool set (40 before; at 40 every remaining long task was in a full tool set), and its rows after those of the reference 30-step run (Qwen3 lists; the Nemotron lists: all its rows) in a seeded random order, so the shorter continuation rows do not end up in the decay; for the two Nemotrons the customer-service conversations are selected by the same method in the model's own tokens (length bins and the 126,976-token prompt limit) instead of taking the Qwen3 rows. Each domain's rows keep their own order; the domains are interleaved so that every prefix holds the same fraction of each domain (row i of a domain with n rows at (i + 0.5) / n), then a 10 % buffer of further rows per domain. Each domain is cut where it holds about the packed tokens of 60 training steps of this model, estimated from this model's own prompt lengths and its answer lengths relative to the reference model on the same benchmarks (Nemotron customer service: Nemotron Nano 9B v2's measured tokens per conversation group and length bin)."
+}

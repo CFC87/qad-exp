@@ -1,0 +1,11 @@
+# Settings shared by the mix60 runs (experiments/mix60/README.md). Every value equals the reference runs; change none
+# of them (CLAUDE.md rule 6). Each model's file adds its model, list, schedule and memory settings.
+cap = 32768                     # response cap per generation
+warmup = 5
+gbs = 36                        # packs of 131,072 tokens per optimizer step
+n_packs = 32
+target_packs = 29
+eval_every = 10                 # validation and checkpoint interval
+max_num_seqs = 128
+hist_sup = true
+stall_min = 120

@@ -9,7 +9,8 @@ for anyone).
 
 ## Requirements
 
-- 1 or 2 nodes per training run, 8x NVIDIA B200 each (`experiments/round4`: three nodes, one model each).
+- 1 or 2 nodes per training run, 8x NVIDIA B200 each (`experiments/round4`, `experiments/mix60`: three nodes, one model
+  each).
 - Ubuntu 24.04, NVIDIA driver 580.126.09 (CUDA 13.0), Docker with the NVIDIA Container Toolkit, `git`, `curl`,
   `python3` >= 3.11.
 - Docker access to `nvcr.io` for the NeMo image (if the pull is refused: `docker login nvcr.io`, user `$oauthtoken`,
@@ -21,10 +22,11 @@ for anyone).
   - about 100 GB of docker images, plus about 55 GB in the repository (environments, the default models, training and
     evaluation data, including 13 GB of unpacked LiveCodeBench Pro test cases);
   - about 500 GB per Qwen3-8B training chain while it runs, up to about 1.4 TB for the 30B-class models of
-    `experiments/round4`; `chain.py clean` frees it after the exports (see the experiment README).
-- Host memory: the 30B-class models of `experiments/round4` with `--layout 1node` keep 70 % of the optimizer state in
-  CPU memory, about 500 GB for the four training processes of a node and more while a checkpoint is written (measured
-  numbers in the experiment README).
+    `experiments/round4` and `experiments/mix60`; `chain.py clean` frees it after the exports (see the experiment
+    README).
+- Host memory: the 30B-class models of `experiments/round4` and `experiments/mix60` with `--layout 1node` keep 70 % of
+  the optimizer state in CPU memory, about 500 GB for the four training processes of a node and more while a checkpoint
+  is written (measured numbers in the experiment README).
 
 ## Setup
 
@@ -38,11 +40,11 @@ python3 tools/check_env.py        # verify everything; writes reports/env_report
 `setup/setup.sh <step> ...` runs single steps:
 - `uv`, `images`, `sender`, `sources`, `venvs`: the tools, images, third-party code and Python environments;
 - `models`: the models;
-- `data`: the training lists, from this repository's releases `data-v1` and `data-v2`;
+- `data`: the training lists, from this repository's releases `data-v1`, `data-v2` and `data-v3`;
 - `eval-data`: the evaluation files. The two gated sets are rebuilt with `HF_TOKEN`;
 - `judge`: the LiveCodeBench Pro judge image;
-- `optional-models`: Qwen3-30B-A3B and the two Nemotrons with their NVFP4 releases (needed by `experiments/round4`),
-  and gpt-oss-120b (not used by any experiment).
+- `optional-models`: Qwen3-30B-A3B and the two Nemotrons with their NVFP4 releases (needed by `experiments/round4` and
+  `experiments/mix60`), and gpt-oss-120b (not used by any experiment).
 
 Everything is installed inside the repository: `.tools/`, `.venv-*`, `third_party/`, `models/`, `data/`, `eval/data/`,
 `.cache/`. Nothing is installed system-wide. Every downloaded file is checked against a pinned commit, digest,
@@ -95,6 +97,8 @@ evaluation serves every model on single GPUs (tensor parallel 1).
   60 / 120 / 180-step WSD chain, every budget evaluated on the full benchmark set.
 - [`experiments/round4`](experiments/round4/README.md): QAD of Qwen3-30B-A3B, Nemotron Nano 9B v2 and Nemotron 3 Nano on
   a five-domain mixture, one model per node.
+- [`experiments/mix60`](experiments/mix60/README.md): the same three models on five-domain mixtures with 60 steps of data
+  per domain and the revised customer-service environment, one model per node.
 
 ## Evaluation
 

@@ -7,8 +7,10 @@ format: reasoning, then a reply or a tool call to a tool of the prompt (Qwen3 <t
 Nemotron 3 Nano <tool_call><function=...>). Checks per step: exactly max_packs packs published, pad id of the model in the
 pack padding, the function-calling rows (subset *_b1) one sample each, the customer-service rows played as episodes, no
 generation error; Nemotron 3 Nano: turns parsed by the service.
+The mix60 configs (experiments/mix60) run the same way, given as mix60/<config>; their customer-service episodes also
+go through the checked environment (sim_kw tool_v2).
 Needs docker and the models of the round-4 experiments (setup/setup.sh optional-models).
-    ../.venv-client/bin/python tests/test_rollout_r4_mock.py [q30_stage1 q30_stage2 n9 n3]
+    ../.venv-client/bin/python tests/test_rollout_r4_mock.py [q30_stage1 q30_stage2 n9 n3 mix60/q30_stage1 mix60/n9 ...]
 """
 import argparse, asyncio, atexit, collections, json, os, random, re, shutil, subprocess, sys, tempfile, time
 _mkdtemp = tempfile.mkdtemp
@@ -87,7 +89,8 @@ def parse_service_up(checkpoint_dir):
 
 
 async def one(exp):
-    ch = chain.Chain(os.path.join(REPO, 'experiments', 'round4', exp + '.toml'),
+    d, exp = exp.split('/') if '/' in exp else ('round4', exp)  # e.g. mix60/n9: another experiment's config
+    ch = chain.Chain(os.path.join(REPO, 'experiments', d, exp + '.toml'),
                      argparse.Namespace(out=tempfile.mkdtemp(), layout='1node', peer=None, peer_ip=None))
     cc = ch.controller_cfg(0, ch.out, ['http://x'], ['http://127.0.0.1:8290'] if ch.cfg.get('multiturn') else [], 0)
     fam = {'len_qwen3': 'qwen3', 'len_n9': 'n9', 'len_n3': 'n3'}[cc['length_col']]
@@ -138,6 +141,8 @@ async def one(exp):
         assert not errs, errs[:2]
         if cc['multiturn']:
             assert calls['mt_turn'] > 0 and calls['sim'] > 0, calls
+            if any((m.get('sim_kw') or {}).get('tool_v2') for m in cc['multiturn'].values()):  # mix60: the checked environment ran
+                assert st.get('mt_user_samples', 0) > 0, {k: v for k, v in st.items() if k.startswith('mt_')}
     if fam == 'n3' and cc['multiturn']:
         assert calls['tool_call'] > 0, 'no tool call was mocked for the parse service'
     print('%s ok (family %s, pad id %d)' % (exp, fam, pad), flush=True)
