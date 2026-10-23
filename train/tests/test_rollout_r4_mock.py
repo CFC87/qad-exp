@@ -56,7 +56,7 @@ def make_mock(tok, fam, eos, rng, single):
     return mock_generate
 
 
-async def mock_sim(session, url, sc, messages, max_tokens, stats=None, accept_cut=False):
+async def mock_sim(session, url, sc, messages, max_tokens, stats=None, accept_cut=False, effort=None):
     calls['sim'] += 1
     await asyncio.sleep(0.01)
     return '{"result": "ok"}' if random.random() < 0.5 else 'Thanks, that works.'

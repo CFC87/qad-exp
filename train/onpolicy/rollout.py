@@ -163,16 +163,19 @@ async def generate(session, url, model, item, max_tokens, sampling, logprobs=Tru
     raise RuntimeError('rollout failed for %s' % item['prompt_id'])
 
 
-async def sim_chat(session, url, sc, messages, max_tokens, stats=None, accept_cut=False):
+async def sim_chat(session, url, sc, messages, max_tokens, stats=None, accept_cut=False, effort=None):
     """One user / tool simulator call (OpenAI-compatible chat, sc = the multi-turn config's "sim") -> the reply text.
     Up to 3 attempts, each with a timeout (sc "timeout", default 300 s; behind sim_throttle.py a rate-limited key makes
     a request wait there while the throttle retries). An error, an empty reply (a reasoning simulator such as gpt-oss
     used up max_tokens on its reasoning) or a cut-off one (finish_reason length: e.g. half a JSON tool result) is
     retried; the third failure raises, which ends that episode as an env error (its finished turns kept in mode each).
     stats: counts mt_sim_empty / mt_sim_cutoff / mt_sim_error per failed attempt. accept_cut: a cut-off reply
-    (non-empty) is returned as it is (tool results)."""
+    (non-empty) is returned as it is (tool results). effort: a per-call reasoning effort (multiturn tool_v2: sim_kw
+    user_effort / tool_effort), sent as reasoning_effort."""
     body = dict(model=sc['model'], messages=messages, max_tokens=max_tokens, temperature=sc.get('temperature', 0.7),
                 top_p=sc.get('top_p', 0.8), **sc.get('extra', {}))
+    if effort:
+        body['reasoning_effort'] = effort
     for attempt in range(3):
         kind = 'mt_sim_error'
         try:
@@ -334,6 +337,11 @@ async def run_step(k, src, feed, cfg, session, route='pack', fixed=None):
         # (fixed prompts) stays single-turn so its KL compares across runs
         mt_key, mtc = mt_cfg(item)
         mtc = None if fixed is not None else mtc
+        if mtc and mtc.get('require_card') and mtc.get('no_card') and item['prompt_id'] not in (cfg.get('_cards') or {}):
+            # a row without a checked card runs in the config's alternative environment "no_card" (e.g. replayed user
+            # turns with the role-swapped user instead of single-turn)
+            stats['mt_no_card_alt'] = stats.get('mt_no_card_alt', 0) + 1
+            mtc = dict(mtc['no_card'])
         if mtc and mtc.get('require_card') and item['prompt_id'] not in (cfg.get('_cards') or {}):
             # env sim only with a checked offline scenario card (online cards can swap the roles): else single-turn,
             # except in a stored-cut set, whose prompt is the whole conversation (not the cut): that row is dropped
@@ -358,8 +366,8 @@ async def run_step(k, src, feed, cfg, session, route='pack', fixed=None):
                 urls = sc['url'] if isinstance(sc['url'], list) else [sc['url']]
                 url = urls[zlib.crc32(str(item['prompt_id']).encode()) % len(urls)]  # one key (throttle) per episode
 
-                async def sim(messages, max_tokens, accept_cut=False):
-                    return await sim_chat(session, url, sc, messages, max_tokens, stats, accept_cut)
+                async def sim(messages, max_tokens, accept_cut=False, effort=None):
+                    return await sim_chat(session, url, sc, messages, max_tokens, stats, accept_cut, effort)
                 card = (cfg.get('_cards') or {}).get(item['prompt_id'])
                 if card and mtc.get('env') == 'sim':
                     sim_kw['card'] = card

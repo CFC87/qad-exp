@@ -38,7 +38,7 @@ async def mock_generate(session, url, model, item, max_tokens, sampling, logprob
     return HEAD + FILL * max(n, 1) + TAIL, ('length' if n >= max_tokens - 30 else 'stop'), -0.3
 
 
-async def mock_sim(session, url, sc, messages, max_tokens, stats=None, accept_cut=False):
+async def mock_sim(session, url, sc, messages, max_tokens, stats=None, accept_cut=False, effort=None):
     calls['sim'] += 1
     await asyncio.sleep(rng.uniform(0.02, 0.1))
     return '{"result": "ok"}' if rng.random() < 0.5 else 'Thanks, that works.'
