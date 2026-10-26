@@ -1,0 +1,11 @@
+# Short check of mix60b's stage-1 path before its run (NVFP4 start, YaRN x4 servers and trainer at 131,072, weight pushes,
+# memory): one 2-step segment on the stage-1 list. Not a result.
+include = "q30_stage1.toml"
+name = "smoke-mix60b-q30-long"
+export_prefix = "smoke-mix60b-q30"
+budgets = [2]
+decays = [1]
+warmup = 1
+eval_every = 2
+val_n = 32
+keep_weights = []

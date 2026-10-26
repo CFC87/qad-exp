@@ -1,0 +1,37 @@
+# The multi-turn environment of mix60b: mix60's (../mix60/base_mt.toml: scenario cards, episode deadline, the
+# function-calling entries) with three switches added to the customer-service entries. All three are off by default in
+# train/onpolicy/multiturn.py, so mix60 and round 4 keep their environment.
+#   code_v3   the one-time code the recorded customer received stays hidden on the card until a send succeeds in the
+#             episode, and is given to the customer after it (customers had offered a card code before any send, or said
+#             a sent code never arrived)
+#   log_v3    rejected customer candidates and the reasons are logged with the episode (logging only)
+#   close_v4  the customer's end: no "the representative awaits your answer" gate; every end (a stop marker or a
+#             closing message) goes to a narrowed goal audit (an end is refused only when a card goal can be named that is
+#             still open) and ends the episode exactly when the audit and every other check allowed it; an allowed end
+#             skips the customer reviewer. The tool side, the fact check and both reviewers are otherwise unchanged.
+# This file is the only place the mix60b environment is set.
+include = "../mix60/base_mt.toml"
+
+[multiturn."SFT-Agentic-v2/interactive_agent"]
+env = "sim"
+mode = "each"
+require_card = true
+log = true
+cost_prior = 6.6
+sim_kw = { tool_v2 = true, sim_ctx = 65536, user_effort = "medium", tool_effort = "medium", arg_index = "data/subsets/arg_index_mix_v2.json", code_v3 = true, log_v3 = true, close_v4 = true }
+
+[multiturn."Agentic-v1/interactive_agent"]
+env = "sim"
+mode = "each"
+require_card = true
+log = true
+cost_prior = 7.8
+sim_kw = { tool_v2 = true, sim_ctx = 65536, user_effort = "medium", tool_effort = "medium", arg_index = "data/subsets/arg_index_mix_v2.json", code_v3 = true, log_v3 = true, close_v4 = true }
+
+[multiturn."RL-Agentic-Conversational-Tool-Use-Pivot-v1"]
+env = "sim"
+mode = "each"
+require_card = true
+log = true
+cost_prior = 5.4
+sim_kw = { tool_v2 = true, sim_ctx = 65536, user_effort = "medium", tool_effort = "medium", arg_index = "data/subsets/arg_index_mix_v2.json", code_v3 = true, log_v3 = true, close_v4 = true }

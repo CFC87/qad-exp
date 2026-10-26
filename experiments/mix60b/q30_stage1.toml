@@ -1,0 +1,22 @@
+# Qwen3-30B-A3B mix60b, stage 1 of 2: long context FIRST (the order is reversed from mix60: after 240 mixed steps, the
+# long-context stage lost much of the other domains' gains), with YaRN x4 (window 131,072), 60 steps from the NVFP4 start,
+# WSD decay over the last 15; the last step's weights exported (mix60b-q30-s060, not evaluated). The list is mix60's
+# stage-2 list (round 4's stage-2 file). No multi-turn data.
+include = "../mix60/base.toml"
+name = "mix60b-q30-long"
+export_prefix = "mix60b-q30"
+model = "Qwen3-30B-A3B"
+checkpoint = "Qwen3-30B-A3B-NVFP4"     # rollout start; its input scales become the student's activation scales
+subset = "mix_r4_s2_long_q30_s20261021"
+rope = "yarn"
+window = 131072
+budgets = [60]
+decays = [15]
+keep_weights = []
+lr = 1e-5
+min_lr = 1e-6
+val_n = 187
+expected_json = "train/configs/expected_bench_8b.json"
+
+[optimizer_overrides]           # 1node: as mix60 (70 % of the optimizer on the CPU, fp32 kept)
+1node = { use_precision_aware_optimizer = true, optimizer_cpu_offload = true, optimizer_offload_fraction = 0.7, overlap_cpu_optimizer_d2h_h2d = true }

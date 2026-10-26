@@ -393,7 +393,8 @@ async def run_step(k, src, feed, cfg, session, route='pack', fixed=None):
                                                           subset=item.get('subset'), ended=info['ended'],
                                                           cut_at=info.get('cut_at'), target=info.get('target'),
                                                           resampled=info.get('resampled'), turns=info['turns'],
-                                                          sim=info.get('sim'), conversation=info['conversation']))
+                                                          sim=info.get('sim'), conversation=info['conversation'],
+                                                          **({'sim_log': info['sim_log']} if info.get('sim_log') else {})))
             stats['mt_episodes'] = stats.get('mt_episodes', 0) + 1
             stats['mt_turns'] = stats.get('mt_turns', 0) + len(info['turns'])
             stats.setdefault('mt_ended', {})
