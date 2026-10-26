@@ -1,0 +1,8 @@
+# Arm sft, stage 2: stage2.toml on the SFT-trace version of its list, from this arm's stage-1 step 60. Customer-service
+# conversations with a written trace are one sample each (the recorded conversation, every assistant answer supervised);
+# those without one are played end to end with the simulator (base_mt.toml's environment).
+include = "stage2.toml"
+name = "mix60b-q8-sft"
+export_prefix = "mix60b-q8-sft"
+init_from = "mix60b-q8-sft-long-s060"   # this arm's stage-1 segment (same --out)
+subset = "mix60sft_s1_q8_s20261026"

@@ -1,0 +1,16 @@
+# Qwen3-8B, stage 1 of 2 (shared by the arms of this experiment; each arm's file adds its name and training signal):
+# long context first, with YaRN x4 (window 131,072), 60 steps from the NVFP4 start, WSD decay over the last 15; the last
+# step's weights exported (not evaluated). No multi-turn data.
+include = "../mix60/base.toml"
+model = "Qwen3-8B"
+checkpoint = "Qwen3-8B-NVFP4"          # rollout start; its input scales become the student's activation scales
+subset = "mix60_s2_long_q8_s20261023"
+rope = "yarn"
+window = 131072
+budgets = [60]
+decays = [15]
+keep_weights = []
+lr = 1e-5
+min_lr = 1e-6
+val_n = 187
+expected_json = "train/configs/expected_bench_8b.json"

@@ -1,5 +1,6 @@
 # Training data: GitHub release assets of this repository, fetched by `setup/setup.sh data`. An asset is fetched from
-# the release `release` names, its own `release` when it has one (data-v2: the round-4 lists; data-v3: the mix60 lists).
+# the release `release` names, its own `release` when it has one (data-v2: the round-4 lists; data-v3: the mix60 lists;
+# data-v4: the Qwen3-8B lists of mix60b-q8).
 release = "data-v1"
 repo = "CFC87/qad-exp"
 # Each asset is checked against its sha256 and placed at `path`.
@@ -134,3 +135,27 @@ release = "data-v3"
 path = "data/subsets/arg_index_mix_v2.json"
 sha256 = "468c6d357ada882c51af775c26c263df91b95f3bb2faf528c1fe0b00307d37c7"
 # 10 MB; the recorded calls of the function-calling and customer-service lists per tool and parameter schema
+
+[assets."mix60_s1_q8_s20261023.parquet"]
+release = "data-v4"
+path = "data/subsets/mix60_s1_q8_s20261023/subset.parquet"
+sha256 = "fb6f82cef9ad3c06fbcf690b9ab349647a17b9b5615ec9f006e2915e41e364f9"
+# 338 MB, mix60b-q8 stage 2 (mkl, rkl)
+
+[assets."mix60_s2_long_q8_s20261023.parquet"]
+release = "data-v4"
+path = "data/subsets/mix60_s2_long_q8_s20261023/subset.parquet"
+sha256 = "414f2d579661c8f2939d174420953b1df73a3330fe44f809e708ea1084ae1fd1"
+# 226 MB, mix60b-q8 stage 1 (mkl, rkl)
+
+[assets."mix60sft_s1_q8_s20261026.parquet"]
+release = "data-v4"
+path = "data/subsets/mix60sft_s1_q8_s20261026/subset.parquet"
+sha256 = "e49a6128317368ffdc33471bcc36b08528a04a3f32d061725b6c83098190854a"
+# 1184 MB, mix60b-q8 stage 2 (sft): SFT traces
+
+[assets."mix60sft_s2_long_q8_s20261026.parquet"]
+release = "data-v4"
+path = "data/subsets/mix60sft_s2_long_q8_s20261026/subset.parquet"
+sha256 = "a0ffa9d826d5ebba763fd91492ccf71298509f7acb6b448610a2a38da88a61e8"
+# 295 MB, mix60b-q8 stage 1 (sft): SFT traces

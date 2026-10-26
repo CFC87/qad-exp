@@ -1,0 +1,5 @@
+# Arm mkl, stage 1: stage1.toml with the student's own rollouts (on-policy) and the loss mixed KL: 0.5 forward KL(teacher || student) + 0.5 reverse KL(student || teacher).
+include = "stage1.toml"
+name = "mix60b-q8-mkl-long"
+export_prefix = "mix60b-q8-mkl"
+kd_reverse = 0.5

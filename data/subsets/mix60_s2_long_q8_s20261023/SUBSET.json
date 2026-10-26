@@ -1,0 +1,33 @@
+{
+ "name": "mix60_s2_long_q8_s20261023",
+ "model": "Qwen3-8B",
+ "stage": "YaRN x4, window 131,072: long context",
+ "description": "mix60 list: long context",
+ "train_ranks": [
+  0,
+  10325
+ ],
+ "val_ranks": [
+  10325,
+  10625
+ ],
+ "validation": "300 single-turn prompts shared by every list (ranks val_ranks)",
+ "length_col": "len_qwen3",
+ "steps_of_data": {
+  "long": 60
+ },
+ "rows": {
+  "long": 9386
+ },
+ "buffer_rows": {
+  "long": 939
+ },
+ "packed_tokens_target": {
+  "long": 239834180
+ },
+ "packed_tokens_estimate": {
+  "long": 239842231
+ },
+ "columns": "mix_domain (reasoning / code / bfcl / tau2 / long / val), mix_part (main / buffer), mix_src_rank (rank in its source list)",
+ "rule": "mix60: long-context documents and retrieval at 60 steps of data, selected by the long-context list's rule (the long-context domain list of the round-3 single-domain runs, in its own order), then a 10 % buffer of further rows. Cut where it holds about the packed tokens of 60 training steps of this model, estimated from its own prompt and answer lengths."
+}

@@ -1,0 +1,6 @@
+# Arm rkl, stage 2: stage2.toml from this arm's stage-1 step 60, same loss as its stage 1.
+include = "stage2.toml"
+name = "mix60b-q8-rkl"
+export_prefix = "mix60b-q8-rkl"
+init_from = "mix60b-q8-rkl-long-s060"   # this arm's stage-1 segment (same --out)
+kd_reverse = 1.0

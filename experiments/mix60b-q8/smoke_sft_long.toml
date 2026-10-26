@@ -1,0 +1,11 @@
+# Short check of arm sft's stage-1 path (NVFP4 start, YaRN, written traces mixed with generated rows): one 2-step segment.
+# Not a result.
+include = "sft_stage1.toml"
+name = "smoke-mix60b-q8-sft-long"
+export_prefix = "smoke-mix60b-q8-sft"
+budgets = [2]
+decays = [1]
+warmup = 1
+eval_every = 2
+val_n = 32
+keep_weights = []

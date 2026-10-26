@@ -131,6 +131,10 @@ class Chain:
         # init_from: a segment of another chain (same OUT) whose last weights-only checkpoint this chain starts from
         # (new optimizer and schedule, step 0)
         self.init_from = c.get("init_from")
+        # kd_reverse: the weight w of the reverse KL in the loss, (1 - w) KL(teacher || student) + w KL(student || teacher)
+        # (qad_distill.py CL_KD_REVERSE; 0 = forward KL only, the default; 1 = reverse KL only)
+        self.kd_reverse = float(c.get("kd_reverse", 0))
+        assert 0.0 <= self.kd_reverse <= 1.0, "kd_reverse is a weight in [0, 1]"
         self.log_path = self.out / f"{self.name}.chain.log"
 
     # -------------------------------------------------------------------------------------------------- utilities
@@ -379,6 +383,8 @@ class Chain:
             env["CL_OPTIMIZER_OVERRIDES"] = json.dumps(opt)
         if self.init_from and i == 0:
             env["CL_PRETRAINED"] = f"/out/{s}.init/checkpoints"
+        if self.kd_reverse > 0:
+            env["CL_KD_REVERSE"] = repr(self.kd_reverse)
         cmd = ["torchrun", "--nnodes", "1", "--nproc-per-node", str(pp), "--master-addr", "127.0.0.1", "--master-port", str(TORCH_PORT),
                "/cl/qad_distill.py", "--pp_size", str(pp), "--student_hf_path", self.hf_train,
                "--student_megatron_path", f"/out/{self.ptq}", "--teacher_hf_path", self.hf_train, "--use_mock_data",

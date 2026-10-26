@@ -1,0 +1,17 @@
+# Qwen3-8B, stage 2 of 2 (shared by the arms): reasoning, code, function calling and customer service with the native RoPE
+# (window 40,960), 240 steps from stage 1's step-60 weights (a new optimizer and schedule), WSD decay over the last 40; the
+# last step's weights exported and evaluated. Multi-turn environment: mix60b's (code_v3, log_v3, close_v4).
+include = "../mix60b/base_mt.toml"
+model = "Qwen3-8B"
+checkpoint = "Qwen3-8B-NVFP4"
+subset = "mix60_s1_q8_s20261023"
+rope = "plain"
+window = 40960
+budgets = [240]
+decays = [40]
+keep_weights = []
+export_offset = 60
+lr = 1e-5
+min_lr = 1e-6
+val_n = 187
+expected_json = "train/configs/expected_bench_8b.json"

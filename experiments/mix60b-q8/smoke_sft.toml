@@ -1,0 +1,14 @@
+# Short check of arm sft's stage-2 path (start from the smoke's stage-1 weights, written traces, generated rows and the
+# multi-turn simulator): one 2-step segment from smoke_sft_long's step 2. Run it after smoke_sft_long and before its
+# clean. Not a result.
+include = "sft_stage2.toml"
+name = "smoke-mix60b-q8-sft"
+init_from = "smoke-mix60b-q8-sft-long-s002"
+export_prefix = "smoke-mix60b-q8-sft"
+export_offset = 2
+budgets = [2]
+decays = [1]
+warmup = 1
+eval_every = 2
+val_n = 32
+keep_weights = []

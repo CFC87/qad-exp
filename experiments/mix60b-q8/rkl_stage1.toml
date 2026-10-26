@@ -1,0 +1,5 @@
+# Arm rkl, stage 1: stage1.toml with the student's own rollouts (on-policy) and the loss reverse KL(student || teacher) only.
+include = "stage1.toml"
+name = "mix60b-q8-rkl-long"
+export_prefix = "mix60b-q8-rkl"
+kd_reverse = 1.0
