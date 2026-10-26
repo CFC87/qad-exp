@@ -99,8 +99,8 @@ evaluation serves every model on single GPUs (tensor parallel 1).
   a five-domain mixture, one model per node.
 - [`experiments/mix60`](experiments/mix60/README.md): the same three models on five-domain mixtures with 60 steps of data
   per domain and the revised customer-service environment, one model per node.
-- [`experiments/mix60b`](experiments/mix60b/README.md): mix60's Qwen3-30B-A3B again, with the long-context stage first
-  and the updated customer-service environment.
+- [`experiments/mix60b`](experiments/mix60b/README.md): only mix60's Qwen3-30B-A3B again, with the long-context stage
+  first and the updated customer-service environment (the Nemotron runs are not repeated).
 
 ## Evaluation
 
