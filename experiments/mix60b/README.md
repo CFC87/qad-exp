@@ -2,7 +2,7 @@
 
 **What to run: only Qwen3-30B-A3B is trained again.** The Nemotron Nano 9B v2 and Nemotron 3 Nano runs of mix60 are
 not repeated and keep their mix60 results. No new data: the lists, scenario cards and argument index are mix60's files,
-already on disk after mix60 (`setup/setup.sh data` reports them as present).
+already on disk after mix60 (`setup/setup.sh data` prints `ok` for each and fetches nothing).
 
 The same data, settings and model as `experiments/mix60`'s Qwen3-30B-A3B run, with two changes:
 
