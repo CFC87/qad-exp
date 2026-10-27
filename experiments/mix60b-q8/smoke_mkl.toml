@@ -1,5 +1,5 @@
 # Short check of arm mkl's stage-2 path (start from the smoke's stage-1 weights, multi-turn simulator, the loss): one
-# 2-step segment from smoke_mkl_long's step 2. Run it after smoke_mkl_long and before its clean. Not a result.
+# 2-step segment from smoke_mkl_long's step 2. Run it after smoke_mkl_long. Not a result.
 include = "mkl_stage2.toml"
 name = "smoke-mix60b-q8-mkl"
 init_from = "smoke-mix60b-q8-mkl-long-s002"

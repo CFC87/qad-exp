@@ -1,6 +1,6 @@
 # Short check of mix60b's stage-2 path before its run (start from stage 1's weights, native RoPE, multi-turn simulator with
 # the mix60b environment, memory): one 2-step segment from smoke_q30_long's step 2 on the stage-2 list. Run it after
-# smoke_q30_long and before `smoke_q30_long clean`. Not a result.
+# smoke_q30_long. Not a result.
 include = "q30_stage2.toml"
 name = "smoke-mix60b-q30"
 init_from = "smoke-mix60b-q30-long-s002"      # smoke_q30_long's segment (same --out)

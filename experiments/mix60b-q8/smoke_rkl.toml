@@ -1,5 +1,5 @@
 # Short check of arm rkl's stage-2 path (start from the smoke's stage-1 weights, multi-turn simulator, the loss): one
-# 2-step segment from smoke_rkl_long's step 2. Run it after smoke_rkl_long and before its clean. Not a result.
+# 2-step segment from smoke_rkl_long's step 2. Run it after smoke_rkl_long. Not a result.
 include = "rkl_stage2.toml"
 name = "smoke-mix60b-q8-rkl"
 init_from = "smoke-mix60b-q8-rkl-long-s002"

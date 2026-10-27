@@ -41,9 +41,12 @@ Why so strict:
 7. **Never print or commit secrets.** API keys and tokens go in environment variables or in the files an
    experiment's README names, outside git.
 
-8. **Never delete training checkpoints, logs, exports or data.** Nothing under `out/` is removed: `out/train/<segment>/`
-   holds the trained checkpoints that later runs start from. If the disk runs short, stop and report; do not free
-   space yourself.
+8. **Never delete anything under `out/` or `data/` yourself**: training checkpoints, logs, exports or data. A chain
+   itself keeps only its newest saves while it trains, as designed; when it is done, each segment keeps the weights-only
+   checkpoint of its last step (and of its `keep_weights` steps), the full checkpoints later branches start from, its
+   logs and its exports. These are what later runs start from: do not remove or overwrite them. To redo something,
+   move the old outputs aside (for example into `out/old/`). If the disk runs short, stop and report; do not free space
+   yourself.
 
 ## First, after pulling: are the trained checkpoints still there?
 
@@ -53,7 +56,10 @@ else, run this in the repository on every node used for training (with the `--ou
 the whole output to the person you work with:
 
 ```bash
-for d in out/train/*/; do s=$(basename "$d"); it=$(cat "$d/checkpoints/latest_checkpointed_iteration.txt" 2>/dev/null | tr -dc 0-9)
+shopt -s nullglob; set -- out/train/*/; [ $# -gt 0 ] || echo "no directory under out/train"
+for d in "$@"; do s=$(basename "$d"); t="$d/checkpoints/latest_checkpointed_iteration.txt"
+  if [ ! -x "$d" ] || { [ -e "$t" ] && [ ! -r "$t" ]; }; then echo "$s: UNREADABLE (list it with sudo)"; continue; fi
+  it=$(cat "$t" 2>/dev/null | tr -dc 0-9)
   if [ -n "$it" ] && [ -d "$d/checkpoints/iter_$(printf %07d "$it")" ]; then echo "$s: last checkpoint iter $it present"
   else echo "$s: NO checkpoint"; fi; done
 grep -H "cleaned: trainer checkpoints" out/*.chain.log   # chains that were cleaned: their checkpoints are gone

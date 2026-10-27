@@ -1,6 +1,6 @@
 # Short check of Qwen3-30B-A3B's stage-2 path before its run (start from stage 1's weights, YaRN x4 servers and trainer at
-# 131,072, memory): one 2-step segment from smoke_q30's step 2 on the stage-2 list. Run it after smoke_q30 and before
-# `smoke_q30 clean`. Not a result.
+# 131,072, memory): one 2-step segment from smoke_q30's step 2 on the stage-2 list. Run it after smoke_q30. Not a
+# result.
 include = "q30_stage2.toml"
 name = "smoke-r4-q30-long"
 init_from = "smoke-r4-q30-s002"         # smoke_q30's segment (same --out)
