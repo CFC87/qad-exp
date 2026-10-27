@@ -1,0 +1,53 @@
+{
+ "name": "mix60c_n9_s20261027",
+ "model": "NVIDIA-Nemotron-Nano-9B-v2",
+ "stage": "one run (window 131,072): all five domains, continuing from mix60_n9_s20261023's run",
+ "description": "mix60c list: the continuation of mix60_n9_s20261023 (code and customer service 30 steps, the other domains 10)",
+ "train_ranks": [
+  0,
+  21270
+ ],
+ "val_ranks": [
+  21270,
+  21570
+ ],
+ "validation": "300 single-turn prompts shared by every list (ranks val_ranks)",
+ "length_col": "len_n9",
+ "steps_of_data": {
+  "reasoning": 10,
+  "code": 30,
+  "bfcl": 10,
+  "tau2": 30,
+  "long": 10
+ },
+ "rows": {
+  "reasoning": 2597,
+  "code": 9587,
+  "bfcl": 2603,
+  "tau2": 3067,
+  "long": 1482
+ },
+ "buffer_rows": {
+  "reasoning": 260,
+  "code": 959,
+  "bfcl": 260,
+  "tau2": 307,
+  "long": 148
+ },
+ "packed_tokens_target": {
+  "reasoning": 43306827,
+  "code": 129421068,
+  "bfcl": 38901007,
+  "tau2": 136883414,
+  "long": 39972363
+ },
+ "packed_tokens_estimate": {
+  "reasoning": 43308844,
+  "code": 129436036,
+  "bfcl": 38904811,
+  "tau2": 136903761,
+  "long": 39990997
+ },
+ "columns": "mix_domain (reasoning / code / bfcl / tau2 / long / val), mix_part (main / buffer), mix_src_rank (rank in its source list)",
+ "rule": "mix60c: the continuation of mix60_n9_s20261023 by the same method, each domain's selection continued in its own order past every row that list holds (main and buffer); no row of it comes back in the same domain. Code 30 steps: infinibyte problems only, 70 % long / 30 % short by reference answer length (every hard original problem is already in mix60's list). Customer service 30 steps: the Nemotron Nano 9B v2 customer-service list in its rank order (customer-service and multi-turn function-calling conversations played end to end, with 10 % long math reasoning rows). Reasoning 10 steps: math only, the math sequence continued (the fixed science part is all in mix60's list). Function calling 10 steps: the Nemotron Nano 9B v2 function-calling list in its rank order past mix60's rows, then in a seeded random order. Long context 10 steps: the long-context sequence continued. Each domain is cut where it holds about the packed tokens of its steps for this model, estimated as for mix60_n9_s20261023; the domains are interleaved so that every prefix holds the same fraction of each domain (row i of a domain with n rows at (i + 0.5) / n), then a 10 % buffer of further rows per domain."
+}

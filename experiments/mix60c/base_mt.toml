@@ -1,0 +1,21 @@
+# mix60c's multi-turn environment: mix60b's (mix60's environment with code_v3, log_v3 and close_v4 on the
+# customer-service entries) and the customer cards of the two lists' new customer-service conversations, loaded after
+# mix60's cards (a later file wins for the same prompt_id; only ok cards are used).
+include = "../mix60b/base_mt.toml"
+scenario_cards = [
+  "data/subsets/tau2_cut_mt_25k_s20261001/scenario_cards_v2_final.parquet",
+  "data/subsets/tau2_r3_t3_s20261014/customer_cards_fill_v1.parquet",
+  "data/subsets/mix60_cards_s20261023/customer_cards_fill_n9.parquet",
+  "data/subsets/mix60_cards_s20261023/customer_cards_fill_n3.parquet",
+  "data/subsets/tau2_r3_t3_s20261014/customer_cards_v3.parquet",
+  "data/subsets/mix60_cards_s20261023/customer_cards_v3_q.parquet",
+  "data/subsets/mix60_cards_s20261023/customer_cards_v3_n9.parquet",
+  "data/subsets/mix60_cards_s20261023/customer_cards_v3_n3.parquet",
+  "data/subsets/mix60_cards_s20261023/customer_cards_alias.parquet",
+  "data/subsets/mix60c_cards_s20261027/customer_cards_fill_n9.parquet",
+  "data/subsets/mix60c_cards_s20261027/customer_cards_fill_n3.parquet",
+  "data/subsets/mix60c_cards_s20261027/customer_cards_v3_n9.parquet",
+  "data/subsets/mix60c_cards_s20261027/customer_cards_v3_n3.parquet",
+  "data/subsets/mix60c_cards_s20261027/customer_cards_alias.parquet",
+  "data/subsets/mix60c_cards_s20261027/customer_cards_alias_n3.parquet",
+]

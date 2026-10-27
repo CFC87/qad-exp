@@ -110,7 +110,7 @@ REFERENCE_ARMS = {
                                 "n3-ptq": "NVIDIA-Nemotron-3-Nano-30B-A3B-PTQ-NVFP4-nvscale"},
 }
 
-# Exports of experiments/round4, experiments/mix60, experiments/mix60b and experiments/mix60b-q8: <name> -> model; the checkpoint is out/exports/<name> unless given
+# Exports of experiments/round4, experiments/mix60, experiments/mix60b, experiments/mix60b-q8 and experiments/mix60c: <name> -> model; the checkpoint is out/exports/<name> unless given
 # as NAME=PATH.
 EXPORTS_DIR = paths.REPO / "out" / "exports"
 EXPORTS = {**{f"r4-q30-s{s}": "qwen3-30b-a3b" for s in (150, 160, 180, 210, 240)},
@@ -120,6 +120,8 @@ EXPORTS = {**{f"r4-q30-s{s}": "qwen3-30b-a3b" for s in (150, 160, 180, 210, 240)
            "mix60-n9-s300": "nemotron-nano-9b-v2",
            "mix60-n3-s300": "nemotron-3-nano-30b-a3b",
            "mix60b-q30-s300": "qwen3-30b-a3b",
+           "mix60c-n9-s390": "nemotron-nano-9b-v2",
+           "mix60c-n3-s390": "nemotron-3-nano-30b-a3b",
            **{f"mix60b-q8-{a}-s300": "qwen3-8b" for a in ("sft", "mkl", "rkl")}}
 
 

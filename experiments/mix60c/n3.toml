@@ -1,0 +1,24 @@
+# Nemotron 3 Nano 30B-A3B, continuation of mix60's run: 90 steps from mix60-n3's step-300 weights (a new optimizer and
+# schedule), WSD decay over the last 15; the last step's weights exported as mix60c-n3-s390. The list continues each of
+# mix60's five portions past every row of mix60_n3 (code and customer service 30 steps each; reasoning, function calling
+# and long context 10 each); the environment is base_mt.toml's. Learning rate and optimizer offload as mix60's run of
+# this model.
+include = "base_mt.toml"
+name = "mix60c-n3"
+export_prefix = "mix60c-n3"
+export_offset = 300
+init_from = "mix60-n3-s300"             # mix60's n3 run (same --out)
+model = "NVIDIA-Nemotron-3-Nano-30B-A3B-BF16"
+checkpoint = "NVIDIA-Nemotron-3-Nano-30B-A3B-PTQ-NVFP4-nvscale"   # built by `prepare` for mix60 (train/prep/build_ptqs.py)
+subset = "mix60c_n3_s20261027"
+window = 131072
+budgets = [90]
+decays = [15]
+keep_weights = []
+lr = 1e-5
+min_lr = 1e-6
+val_n = 300
+expected_json = "train/configs/expected_n3.json"
+
+[optimizer_overrides]
+1node = { use_precision_aware_optimizer = true, optimizer_cpu_offload = true, optimizer_offload_fraction = 0.7, overlap_cpu_optimizer_d2h_h2d = true }

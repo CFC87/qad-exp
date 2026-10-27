@@ -84,10 +84,11 @@ Notes:
   uses it to push weights to the vLLM servers, so sender and receivers are the same build.
 - The `models` step downloads Qwen3-8B and Qwen3-8B-NVFP4 (about 22 GB). `optional-models` adds the other pinned
   models (Qwen3-30B-A3B and the two Nemotrons with their NVFP4 releases, gpt-oss-120b; about 300 GB): needed by
-  `experiments/round4`, `experiments/mix60` and `experiments/mix60b`; gpt-oss-120b itself is not used by any experiment.
+  `experiments/round4`, `experiments/mix60`, `experiments/mix60b` and `experiments/mix60c`; gpt-oss-120b itself is not
+  used by any experiment.
 - `tools/check_env.py --deep` hashes every model weight file against Hugging Face's recorded sha256. It takes a while.
   Run it once after the download.
-- The `data` step downloads the training lists from this repository's releases `data-v1` to `data-v4`; no login is
+- The `data` step downloads the training lists from this repository's releases `data-v1` to `data-v5`; no login is
   needed. It checks each sha256 against `data/MANIFEST.toml`.
 - The `eval-data` step does three things:
   - downloads the evaluation files;

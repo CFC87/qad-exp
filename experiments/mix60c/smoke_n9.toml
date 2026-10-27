@@ -1,0 +1,11 @@
+# Short check of mix60c's path before its run (start from mix60-n9's step-300 weights, the mix60c list and environment,
+# weight pushes, memory): one 2-step segment. Run it after mix60's n9 run, with the same --out. Not a result.
+include = "n9.toml"
+name = "smoke-mix60c-n9"
+export_prefix = "smoke-mix60c-n9"
+budgets = [2]
+decays = [1]
+warmup = 1
+eval_every = 2
+val_n = 32
+keep_weights = []

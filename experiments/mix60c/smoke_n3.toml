@@ -1,0 +1,12 @@
+# Short check of mix60c's Nemotron 3 Nano path before its run (start from mix60-n3's step-300 weights, the mix60c list and
+# environment, weight pushes, the parse service, memory): one 2-step segment. Run it after mix60's n3 run, with the same
+# --out. Not a result.
+include = "n3.toml"
+name = "smoke-mix60c-n3"
+export_prefix = "smoke-mix60c-n3"
+budgets = [2]
+decays = [1]
+warmup = 1
+eval_every = 2
+val_n = 32
+keep_weights = []

@@ -1,0 +1,20 @@
+# Nemotron Nano 9B v2, continuation of mix60's run: 90 steps from mix60-n9's step-300 weights (a new optimizer and
+# schedule), WSD decay over the last 15; the last step's weights exported as mix60c-n9-s390. The list continues each of
+# mix60's five portions past every row of mix60_n9 (code and customer service 30 steps each; reasoning, function calling
+# and long context 10 each); the environment is base_mt.toml's. Learning rate as mix60's run of this model.
+include = "base_mt.toml"
+name = "mix60c-n9"
+export_prefix = "mix60c-n9"
+export_offset = 300
+init_from = "mix60-n9-s300"             # mix60's n9 run (same --out)
+model = "NVIDIA-Nemotron-Nano-9B-v2"
+checkpoint = "NVIDIA-Nemotron-Nano-9B-v2-PTQ-NVFP4-nvscale"   # built by `prepare` for mix60 (train/prep/build_ptqs.py)
+subset = "mix60c_n9_s20261027"
+window = 131072
+budgets = [90]
+decays = [15]
+keep_weights = []
+lr = 1e-6
+min_lr = 1e-7
+val_n = 300
+expected_json = "train/configs/expected_n9.json"
