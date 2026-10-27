@@ -57,7 +57,6 @@ python3 train/launch/chain.py $E/q30_stage1.toml prepare        # finds mix60's 
 python3 train/launch/chain.py $E/q30_stage1.toml check-step0    # only if it never passed for this model with mix60 or round 4
 python3 train/launch/chain.py $E/smoke_q30_long.toml run --layout 1node   # stage-1 path (NVFP4 start, YaRN), 2 steps; smoke checks
 python3 train/launch/chain.py $E/smoke_q30.toml run --layout 1node        # stage-2 path (from the smoke's step 2), 2 steps; smoke checks
-python3 train/launch/chain.py $E/smoke_q30.toml clean && python3 train/launch/chain.py $E/smoke_q30_long.toml clean   # after both passed
 python3 train/launch/chain.py $E/q30_stage1.toml run --layout 1node   # 60 steps of long context: exports mix60b-q30-s060
 python3 train/launch/chain.py $E/q30_stage2.toml run --layout 1node   # 240 mixed steps from stage 1's step 60: mix60b-q30-s300
 ```
@@ -90,10 +89,8 @@ these differences (the stage roles are swapped):
 Send the output of the five checks for both smoke runs, also when all pass. The reminders and `CHAIN_STOP` handling of
 mix60's README apply (replace the mix60 names by these).
 
-**Disk.** `clean` a chain once its exports exist. Run `clean` of `q30_stage1.toml` only after stage 2 has started, that
-is once `out/mix60b-q30.chain.log` shows `INIT_CKPT_OK iter_0000060` (stage 2 lays out its start from stage 1's step-60
-checkpoint into `out/train/mix60b-q30-s240.init` when it launches). Smoke exports are not needed after the smokes'
-`clean`: then `rm -rf out/exports/smoke-mix60b-*`.
+**Disk.** Keep `out/train/`: the trained checkpoints are results (a later run starts from them), and nothing in this
+repository deletes them.
 
 ## Evaluation
 

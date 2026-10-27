@@ -77,12 +77,11 @@ python3 train/launch/chain.py $E/reas_code.toml check-step0
 # 3. Environment check of the evaluation (all 8 GPUs, ~3-4 h; tau2 needs the gpt-5.2 endpoint, see Evaluation):
 #    NVIDIA's NVFP4 release on every phase. Send eval/results/ when it is done; we compare it with our numbers.
 .venv-client/bin/python eval/run.py --arm nvfp4
-# 4. Smoke tests of the launcher, about 1 hour and 15 minutes; they are not results. Free their disk afterwards.
+# 4. Smoke tests of the launcher, about 1 hour and 15 minutes; they are not results.
 python3 train/launch/chain.py $E/smoke.toml run --layout 1node
 python3 train/launch/chain.py $E/smoke_mt.toml run --layout 1node     # needs the simulator API variables
-python3 train/launch/chain.py $E/smoke.toml clean; python3 train/launch/chain.py $E/smoke_mt.toml clean
 # 5. The five chains, one at a time per node (each holds all 8 GPUs of the layout); after each, evaluate its exports
-#    (see Evaluation) and run `clean`.
+#    (see Evaluation).
 python3 train/launch/chain.py $E/reas_code.toml run --layout 1node
 python3 train/launch/chain.py $E/reas_agent.toml run --layout 1node   # multi-turn: simulator API variables
 ...
@@ -118,13 +117,9 @@ Network between the nodes:
 
 ### Disk after a chain
 
-When the chain is done, `out/train/<segment>/` still holds the weights-only checkpoints of every budget and the full
-checkpoints the branches started from (several hundred GB). Once the three exports exist, `clean` deletes them; it keeps
-the controller logs and the exports. Run it before starting the next chain if disk is short:
-
-```bash
-python3 train/launch/chain.py $E/<pair>.toml clean
-```
+When the chain is done, `out/train/<segment>/` holds the weights-only checkpoints of every budget and the full
+checkpoints the branches started from (several hundred GB). Keep `out/train/`: the trained checkpoints are results (a later run starts from them), and nothing in this
+repository deletes them.
 
 ### When something stops
 

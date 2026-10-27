@@ -53,8 +53,8 @@ the layout (`--layout`) and the output directory (`--out`); the ports are fixed 
   `QADX_API_BASE`, `QADX_API_KEY` [`QADX_API_KEY_2`], `QADX_SIM_MODEL`, `QADX_SIM_RPS`).
 - **Disk** under `out/` while a chain trains (estimates): Nano 9B v2 about 400 GB; the 30B-class models about 1.2 TB
   with `--layout 1node` (all four pipeline stages write their optimizer state on the training node, and a new full
-  checkpoint is written before the previous one is removed), Qwen3-30B-A3B about 1.4 TB while stage 2 runs and stage 1
-  is not cleaned yet. Exports: about 17 GB (30B class) and 7 GB (Nano 9B v2) each. Under `models/`: about 300 GB for
+  checkpoint is written before the previous one is removed), Qwen3-30B-A3B about 1.4 TB while stage 2 runs (stage 1's
+  checkpoint stays). Exports: about 17 GB (30B class) and 7 GB (Nano 9B v2) each. Under `models/`: about 300 GB for
   `optional-models`, plus each Nemotron's start checkpoint built by `prepare`.
 - **Host memory, 30B-class models with `--layout 1node`:** 70 % of the optimizer state lives in CPU memory (the
   `optimizer_overrides` of the config; fp32 numerics kept). Measured per training process (one pipeline stage, 131,072-token
@@ -108,8 +108,8 @@ other.
   Qwen3-30B-A3B: run `smoke_q30` again, then `smoke_q30_long` (it starts from `smoke_q30`'s step 2).
 - Nemotron 3 Nano exports made with an earlier version (`out/exports/r4-n3-*`, `out/exports/smoke-r4-n3-*`) carry the
   wrong expert scales: remove them, and for the training run export again with
-  `python3 train/launch/chain.py experiments/round4/n3.toml export` while its trainer checkpoints are still there
-  (before `clean`).
+  `python3 train/launch/chain.py experiments/round4/n3.toml export` from its trainer checkpoints
+  (kept).
 
 **On every node first** (after the general setup of `README.md`):
 
@@ -127,7 +127,6 @@ python3 train/launch/chain.py $E/q30_stage1.toml prepare        # the PTQ studen
 python3 train/launch/chain.py $E/q30_stage1.toml check-step0    # GPUs 0-3; read out/check-step0.txt (pass criteria below)
 python3 train/launch/chain.py $E/smoke_q30.toml run --layout 1node        # stage-1 path, 2 steps; then the smoke checks below
 python3 train/launch/chain.py $E/smoke_q30_long.toml run --layout 1node   # stage-2 path (from the smoke's step 2, YaRN), 2 steps; smoke checks
-python3 train/launch/chain.py $E/smoke_q30_long.toml clean && python3 train/launch/chain.py $E/smoke_q30.toml clean   # after both passed
 python3 train/launch/chain.py $E/q30_stage1.toml run --layout 1node   # 180 steps: exports r4-q30-s150, -s160, -s180
 python3 train/launch/chain.py $E/q30_stage2.toml run --layout 1node   # 60 steps from stage 1's step 180: r4-q30-s210, -s240
 ```
@@ -138,7 +137,6 @@ python3 train/launch/chain.py $E/q30_stage2.toml run --layout 1node   # 60 steps
 python3 train/launch/chain.py $E/n9.toml prepare                # start checkpoint (CPU, a few minutes; must log "629 / 629 tensors match"), PTQ student
 python3 train/launch/chain.py $E/n9.toml check-step0            # one GPU
 python3 train/launch/chain.py $E/smoke_n9.toml run --layout 1node   # 2 steps; then the smoke checks below
-python3 train/launch/chain.py $E/smoke_n9.toml clean                 # after the checks passed
 python3 train/launch/chain.py $E/n9.toml run --layout 1node     # 240 steps: exports r4-n9-s200, -s220, -s240
 ```
 
@@ -148,7 +146,6 @@ python3 train/launch/chain.py $E/n9.toml run --layout 1node     # 240 steps: exp
 python3 train/launch/chain.py $E/n3.toml prepare                # start checkpoint (CPU, up to about 1.5 h on few cores; "24147 / 24147 tensors match"), PTQ student
 python3 train/launch/chain.py $E/n3.toml check-step0            # GPUs 0-3
 python3 train/launch/chain.py $E/smoke_n3.toml run --layout 1node   # 2 steps; then the smoke checks below
-python3 train/launch/chain.py $E/smoke_n3.toml clean                 # after the checks passed
 python3 train/launch/chain.py $E/n3.toml run --layout 1node     # 240 steps: exports r4-n3-s200, -s220, -s240
 ```
 
@@ -185,8 +182,8 @@ training on GPUs 0-3 with four rollout servers on GPUs 4-7; memory on your nodes
 Requirements; the smoke confirms it on yours: the 30B-class models keep 70 % of the optimizer state in CPU memory, and
 stage 2 of Qwen3-30B-A3B trains at 131,072 tokens with YaRN); the weight push into the servers
 after each step; the multi-turn episodes (for Nemotron 3 Nano through the parse service); and the time per step.
-A smoke run tests these in 2 steps of the real list. Its numbers are not results. Do all five checks before `clean`,
-which removes `out/train/<segment>` and with it `metrics.jsonl`. In the commands, `N` is the smoke's name and `S` its
+A smoke run tests these in 2 steps of the real list. Its numbers are not results. Do all five checks; their files are in
+`out/train/<segment>` and `out/runs/<segment>`. In the commands, `N` is the smoke's name and `S` its
 segment:
 
 | Config | `N` | `S` |
@@ -305,14 +302,8 @@ Send the output of the five checks for every smoke run, also when all pass.
   Send `out/<name>.chain.log`, `out/<segment>.trainer.log` (or `out/runs/<segment>/trainer.log` if it exists),
   `out/qadx-parse.log` for Nemotron 3 Nano, and `reports/env_report.md`.
 
-**Disk.**
-- `clean` a chain once its exports exist. It keeps the exports.
-- Smoke exports are not needed after the smoke checks and the smokes' `clean` (`clean` refuses while a chain's export
-  is missing): then `rm -rf out/exports/smoke-r4-*` (the one of `smoke_q30_long` is `smoke-r4-q30-s004`).
-- Qwen3-30B-A3B: run `clean` of `q30_stage1.toml` only after stage 2 has started, that is once
-  `out/r4-q30-long.chain.log` shows `INIT_CKPT_OK iter_0000180`. Stage 2 lays out its start from stage 1's step-180
-  checkpoint when it launches, into `out/train/r4-q30-long-s060.init`. A restart of stage 2 still finds it after
-  stage 1 is cleaned.
+**Disk.** Keep `out/train/`: the trained checkpoints are results (a later run starts from them), and nothing in this
+repository deletes them.
 - If stage 2 stops before its first full checkpoint, the chain prints how to start it again. That keeps the `.init`
   start.
 

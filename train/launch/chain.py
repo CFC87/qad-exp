@@ -7,7 +7,6 @@
     python3 train/launch/chain.py EXPERIMENT.toml run   --layout 2node --peer HOST
     python3 train/launch/chain.py EXPERIMENT.toml status | stop | export | resume SEGMENT STEP [layout args]
     python3 train/launch/chain.py EXPERIMENT.toml dryrun --layout 1node             # write configs, print commands
-    python3 train/launch/chain.py EXPERIMENT.toml clean                             # after export: drop trainer checkpoints
 
 Layouts (README.md): 1node = GPUs 0-3 train (pipeline parallel 4), GPUs 4-7 serve rollouts (one vLLM server each);
 2node = this node's GPUs 0-7 train (pipeline parallel 8), the peer's GPUs 0-7 serve rollouts. Run the script on the
@@ -769,16 +768,6 @@ class Chain:
         self.root(f"rm -rf /out/train/{d} /out/train/{d}-hf")  # compared: the result is in {d}.txt (rerun to repeat)
         self.log(f"step-0 comparison written to {self.out / (d + '.txt')}")
 
-    def clean(self):
-        """After every budget is exported: remove the chain's trainer checkpoints (OUT/train/<segment>), keeping the
-        controller logs (OUT/runs) and the exports. Refuses while an export is missing."""
-        missing = [x for _, x in self.export_steps() if not (self.out / "exports" / self.export_name(x) / "hf_quant_config.json").exists()]
-        if missing:
-            self.die(f"not cleaned: steps {missing} are not exported yet")
-        for i in range(len(self.budgets)):
-            self.root(f"rm -rf /out/train/{self.seg(i)} /out/train/{self.seg(i)}.init")
-        self.log(f"cleaned: trainer checkpoints of {self.name} removed (exports and controller logs kept)")
-
     def status(self):
         for i in range(len(self.budgets)):
             print(f"{self.seg(i)}: {self.state(i)}")
@@ -867,7 +856,7 @@ def http_ok(url):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("experiment")
-    ap.add_argument("action", choices=["prepare", "check-step0", "run", "status", "stop", "export", "resume", "dryrun", "clean"])
+    ap.add_argument("action", choices=["prepare", "check-step0", "run", "status", "stop", "export", "resume", "dryrun"])
     ap.add_argument("args", nargs="*", help="resume: SEGMENT STEP")
     ap.add_argument("--layout", choices=["1node", "2node"])
     ap.add_argument("--peer", help="2node: ssh host of the rollout node")
@@ -891,8 +880,6 @@ def main():
         ch.dryrun()
     elif a.action == "check-step0":
         ch.check_step0()
-    elif a.action == "clean":
-        ch.clean()
 
 
 if __name__ == "__main__":

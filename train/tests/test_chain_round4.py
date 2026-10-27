@@ -51,7 +51,7 @@ def main():
     assert (d / "latest_train_state.pt").read_text().strip() == "t"
     o2 = ch.root(chain.init_cmd(f"/out/train/{c1.seg(0)}/checkpoints", f"/out/train/{c2.seg(0)}.init/checkpoints"))
     assert "exists" in o2, o2
-    # stage 1 cleaned after stage 2 laid out its start: a restart of stage 2 still finds it
+    # stage 1 moved away after stage 2 laid out its start: a restart of stage 2 still finds it
     ch.root(f"mv /out/train/{c1.seg(0)} /out/train/{c1.seg(0)}.away")
     o3 = ch.root(chain.init_cmd(f"/out/train/{c1.seg(0)}/checkpoints", f"/out/train/{c2.seg(0)}.init/checkpoints"))
     assert "INIT_CKPT_OK iter_0000180: exists" in o3, o3
@@ -61,13 +61,6 @@ def main():
             f"/out/train/{c2.seg(0)}.init/checkpoints/iter_0000180/__0_0.distcp")
     o4 = ch.root(chain.init_cmd(f"/out/train/{c1.seg(0)}/checkpoints", f"/out/train/{c2.seg(0)}.init/checkpoints"))
     assert "INIT_CKPT_OK iter_0000180 from" in o4 and (d / "iter_0000180" / "__0_0.distcp").exists(), o4
-    # clean (exports present) removes both chains' checkpoints and stage 2's start
-    for c in (c1, c2):
-        for _, x in c.export_steps():
-            (out / "exports" / c.export_name(x)).mkdir(parents=True, exist_ok=True)
-            (out / "exports" / c.export_name(x) / "hf_quant_config.json").write_text("{}")
-        c.clean()
-    assert not (out / "train" / c1.seg(0)).exists() and not (out / "train" / f"{c2.seg(0)}.init").exists()
     # the stage-2 smoke starts from the stage-1 smoke
     s1, s2 = chain.Chain(R4 / "smoke_q30.toml", ns(out)), chain.Chain(R4 / "smoke_q30_long.toml", ns(out))
     assert s2.init_from == s1.seg(0) == "smoke-r4-q30-s002" and s2.yarn and s2.cfg["window"] == 131072
