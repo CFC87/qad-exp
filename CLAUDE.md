@@ -41,6 +41,28 @@ Why so strict:
 7. **Never print or commit secrets.** API keys and tokens go in environment variables or in the files an
    experiment's README names, outside git.
 
+8. **Never delete training checkpoints, logs, exports or data.** Nothing under `out/` is removed: `out/train/<segment>/`
+   holds the trained checkpoints that later runs start from. If the disk runs short, stop and report; do not free
+   space yourself.
+
+## First, after pulling: are the trained checkpoints still there?
+
+Earlier versions of the experiment READMEs said to run `chain.py <config> clean` after a run's exports. That command
+deleted `out/train/<segment>/`, the run's trained checkpoints. It has been removed from the repository. Before anything
+else, run this in the repository on every node used for training (with the `--out` you used, default `out/`), and send
+the whole output to the person you work with:
+
+```bash
+for d in out/train/*/; do s=$(basename "$d"); it=$(cat "$d/checkpoints/latest_checkpointed_iteration.txt" 2>/dev/null | tr -dc 0-9)
+  if [ -n "$it" ] && [ -d "$d/checkpoints/iter_$(printf %07d "$it")" ]; then echo "$s: last checkpoint iter $it present"
+  else echo "$s: NO checkpoint"; fi; done
+grep -H "cleaned: trainer checkpoints" out/*.chain.log   # chains that were cleaned: their checkpoints are gone
+ls out/exports/
+```
+
+Report which runs still have their last checkpoint and which were cleaned. Do not start, stop or delete anything because
+of this check.
+
 ## Setup walkthrough
 
 ```bash
