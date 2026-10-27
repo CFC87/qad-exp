@@ -22,8 +22,8 @@ for anyone).
   - about 100 GB of docker images, plus about 55 GB in the repository (environments, the default models, training and
     evaluation data, including 13 GB of unpacked LiveCodeBench Pro test cases);
   - about 500 GB per Qwen3-8B training chain while it runs, up to about 1.4 TB for the 30B-class models of
-    `experiments/round4` and `experiments/mix60`. A finished chain keeps its last checkpoints and its exports; nothing
-    in this repository deletes trained checkpoints.
+    `experiments/round4` and `experiments/mix60`. A finished chain keeps each segment's last checkpoint and its exports;
+    do not remove them by hand (CLAUDE.md, rule 8).
 - Host memory: the 30B-class models of `experiments/round4` and `experiments/mix60` with `--layout 1node` keep 70 % of
   the optimizer state in CPU memory, about 500 GB for the four training processes of a node and more while a checkpoint
   is written (measured numbers in the experiment README).

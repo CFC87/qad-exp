@@ -89,8 +89,8 @@ these differences (the stage roles are swapped):
 Send the output of the five checks for both smoke runs, also when all pass. The reminders and `CHAIN_STOP` handling of
 mix60's README apply (replace the mix60 names by these).
 
-**Disk.** Keep `out/train/`: the trained checkpoints are results (a later run starts from them), and nothing in this
-repository deletes them.
+**Disk.** Keep `out/train/`: the trained checkpoints are results (a later run starts from them); do not remove them by hand
+(CLAUDE.md, rule 8).
 
 ## Evaluation
 

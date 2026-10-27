@@ -99,8 +99,8 @@ The step-0 check: go on only with `VERDICT PASS` in `out/check-step0.txt` (crite
 Send the output of the five checks for both smoke runs, also when all pass. The reminders and `CHAIN_STOP` handling of
 mix60's README apply (with these names).
 
-**Disk.** Keep `out/train/`: the trained checkpoints are results (a later run starts from them), and nothing in this
-repository deletes them.
+**Disk.** Keep `out/train/`: the trained checkpoints are results (a later run starts from them); do not remove them by hand
+(CLAUDE.md, rule 8).
 
 ## Evaluation
 

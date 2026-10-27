@@ -42,9 +42,9 @@ Why so strict:
    experiment's README names, outside git.
 
 8. **Never delete anything under `out/` or `data/` yourself**: training checkpoints, logs, exports or data. A chain
-   itself keeps only its newest saves while it trains, as designed; when it is done, each segment keeps the weights-only
-   checkpoint of its last step (and of its `keep_weights` steps), the full checkpoints later branches start from, its
-   logs and its exports. These are what later runs start from: do not remove or overwrite them. To redo something,
+   itself removes older saves and full (optimizer) checkpoints it no longer needs, as designed; when it is done, each
+   segment keeps at least the weights-only checkpoint of its last step (what later runs start from), its logs and its
+   exports. Do not remove or overwrite them. To redo something,
    move the old outputs aside (for example into `out/old/`). If the disk runs short, stop and report; do not free space
    yourself.
 
@@ -56,13 +56,16 @@ else, run this in the repository on every node used for training (with the `--ou
 the whole output to the person you work with:
 
 ```bash
-shopt -s nullglob; set -- out/train/*/; [ $# -gt 0 ] || echo "no directory under out/train"
-for d in "$@"; do s=$(basename "$d"); t="$d/checkpoints/latest_checkpointed_iteration.txt"
-  if [ ! -x "$d" ] || { [ -e "$t" ] && [ ! -r "$t" ]; }; then echo "$s: UNREADABLE (list it with sudo)"; continue; fi
+shopt -s nullglob
+if [ -d out/train ] && { [ ! -r out/train ] || [ ! -x out/train ]; }; then echo "out/train: UNREADABLE (list it with sudo)"; fi
+segs=(out/train/*/); [ ${#segs[@]} -gt 0 ] || echo "no directory under out/train"
+for d in "${segs[@]}"; do s=$(basename "$d"); c="$d/checkpoints"; t="$c/latest_checkpointed_iteration.txt"
+  if [ ! -r "$d" ] || [ ! -x "$d" ] || { [ -e "$c" ] && { [ ! -r "$c" ] || [ ! -x "$c" ]; }; } || { [ -e "$t" ] && [ ! -r "$t" ]; }; then
+    echo "$s: UNREADABLE (list it with sudo)"; continue; fi
   it=$(cat "$t" 2>/dev/null | tr -dc 0-9)
-  if [ -n "$it" ] && [ -d "$d/checkpoints/iter_$(printf %07d "$it")" ]; then echo "$s: last checkpoint iter $it present"
+  if [ -n "$it" ] && [ -d "$c/iter_$(printf %07d "$it")" ]; then echo "$s: last checkpoint iter $it present"
   else echo "$s: NO checkpoint"; fi; done
-grep -H "cleaned: trainer checkpoints" out/*.chain.log   # chains that were cleaned: their checkpoints are gone
+logs=(out/*.chain.log); [ ${#logs[@]} -eq 0 ] || grep -H "cleaned: trainer checkpoints" "${logs[@]}"   # chains that were cleaned: their checkpoints are gone
 ls out/exports/
 ```
 

@@ -94,7 +94,7 @@ Send the output of the five checks of each smoke run, also when all pass. The re
 mix60's README apply (replace the mix60 names by these).
 
 **Disk.** Keep `out/train/mix60-<m>-s300` and `out/train/mix60c-<m>-s090`: they are the trained checkpoints (a later
-run starts from them), and nothing in this repository deletes them.
+run starts from them); do not remove them by hand (CLAUDE.md, rule 8).
 
 ## Evaluation
 

@@ -294,8 +294,8 @@ Send the output of the five checks for every smoke run, also when all pass.
   Send `out/<name>.chain.log`, `out/<segment>.trainer.log` (or `out/runs/<segment>/trainer.log` if it exists),
   `out/qadx-parse.log` for Nemotron 3 Nano, and `reports/env_report.md`.
 
-**Disk.** Keep `out/train/`: the trained checkpoints are results (a later run starts from them), and nothing in this
-repository deletes them.
+**Disk.** Keep `out/train/`: the trained checkpoints are results (a later run starts from them); do not remove them by hand
+(CLAUDE.md, rule 8).
 - If stage 2 stops before its first full checkpoint, the chain prints how to start it again. That keeps the `.init`
   start.
 

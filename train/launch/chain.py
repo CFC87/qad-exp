@@ -459,8 +459,9 @@ class Chain:
             parent = self.seg(i - 1)
             if (run_dir / "steps.jsonl").exists():
                 self.die(f"{run_dir} already has a controller log (an earlier branch attempt?): to retry the branch, run `stop`, "
-                         f"remove out/runs/{s} and out/train/{s} (root-owned: docker run --rm -v <out>:/out --entrypoint rm "
-                         f"<nemo image> -rf /out/train/{s}), then run the chain again")
+                         f"move out/runs/{s} and out/train/{s} aside into a new directory under out/old/ (out/train is root-owned: "
+                         f"docker run --rm -v <out>:/out --entrypoint mv <nemo image> /out/train/{s} /out/old/<dir>/), then run the "
+                         f"chain again; do not delete them")
             run_dir.mkdir(parents=True, exist_ok=True)
             r = subprocess.run([sys.executable, str(ONPOLICY / "ledger.py"), "branch", str(self.out / "runs" / parent), str(run_dir),
                                 str(start), str(self.cfg["eval_every"])], capture_output=True, text=True)

@@ -92,22 +92,22 @@ other.
     criteria expected bitwise equality, which this release cannot meet.
 - If you ran a smoke with an earlier version (Qwen3-30B-A3B, Nemotron 3 Nano), run it again after pulling: the CPU
   offload went from 50 % to 70 % of the optimizer state (at 50 % Qwen3-30B-A3B ran out of GPU memory), and Nemotron 3
-  Nano's export changed. First move what the earlier smoke left aside into `out/old/` (nothing is deleted; `N` and `S` as in the smoke table below; the
+  Nano's export changed. First move what the earlier smoke left aside into a new directory under `out/old/` (nothing is deleted; `N` and `S` as in the smoke table below; the
   smoke's export is `smoke-r4-q30-s002`, `smoke-r4-q30-s004` for `smoke_q30_long`, `smoke-r4-n3-s002`;
   `out/train/<S>` was written by the trainer as root), and move its chain log aside (the chain appends to it, so the
   smoke check 1 would still find the earlier run's lines):
 
   ```bash
   python3 train/launch/chain.py experiments/round4/<smoke config> stop --layout 1node
-  mv out/<N>.chain.log out/<N>.chain.log.old
-  mkdir -p out/old && mv out/runs/<S> out/old/runs-<S> && mv out/exports/<smoke export> out/old/
+  A=old/<N>-$(date +%Y%m%d-%H%M%S); mkdir -p out/$A     # a new directory for every redo
+  mv out/<N>.chain.log out/runs/<S> out/exports/<smoke export> out/$A/; test ! -e out/<N>.mem.log || mv out/<N>.mem.log out/$A/
   IMG=$(python3 -c "import tomllib; v = tomllib.load(open('env/versions.toml', 'rb'))['images']['nemo']; print(v['ref'] + '@' + v['digest'])")
-  docker run --rm -v $PWD/out:/out --entrypoint sh $IMG -c 'mv /out/train/<S> /out/old/train-<S>; test ! -e /out/train/<S>.init || mv /out/train/<S>.init /out/old/train-<S>.init'
+  docker run --rm -v $PWD/out:/out --entrypoint sh $IMG -c "mv /out/train/<S> /out/$A/train-<S>; test ! -e /out/train/<S>.init || mv /out/train/<S>.init /out/$A/train-<S>.init"
   ```
 
   Qwen3-30B-A3B: run `smoke_q30` again, then `smoke_q30_long` (it starts from `smoke_q30`'s step 2).
 - Nemotron 3 Nano exports made with an earlier version (`out/exports/r4-n3-*`, `out/exports/smoke-r4-n3-*`) carry the
-  wrong expert scales: move them aside (`mkdir -p out/old && mv out/exports/r4-n3-* out/exports/smoke-r4-n3-* out/old/`),
+  wrong expert scales: move them aside into a new directory under `out/old/`,
   and for the training run export again with
   `python3 train/launch/chain.py experiments/round4/n3.toml export` from its trainer checkpoints
   (kept).
@@ -303,8 +303,8 @@ Send the output of the five checks for every smoke run, also when all pass.
   Send `out/<name>.chain.log`, `out/<segment>.trainer.log` (or `out/runs/<segment>/trainer.log` if it exists),
   `out/qadx-parse.log` for Nemotron 3 Nano, and `reports/env_report.md`.
 
-**Disk.** Keep `out/train/`: the trained checkpoints are results (a later run starts from them), and nothing in this
-repository deletes them.
+**Disk.** Keep `out/train/`: the trained checkpoints are results (a later run starts from them); do not remove them by hand
+(CLAUDE.md, rule 8).
 - If stage 2 stops before its first full checkpoint, the chain prints how to start it again. That keeps the `.init`
   start.
 

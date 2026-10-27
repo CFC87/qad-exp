@@ -117,9 +117,9 @@ Network between the nodes:
 
 ### Disk after a chain
 
-When the chain is done, `out/train/<segment>/` holds the weights-only checkpoints of every budget and the full
-checkpoints the branches started from (several hundred GB). Keep `out/train/`: the trained checkpoints are results (a later run starts from them), and nothing in this
-repository deletes them.
+When the chain is done, `out/train/<segment>/` holds the weights-only checkpoints of every budget and branch point
+(the chain itself removes older saves and full checkpoints it no longer needs). Keep `out/train/`: the trained checkpoints are results (a later run starts from them); do not remove them by hand
+(CLAUDE.md, rule 8).
 
 ### When something stops
 
