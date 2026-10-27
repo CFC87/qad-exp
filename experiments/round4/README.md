@@ -100,7 +100,8 @@ other.
   ```bash
   python3 train/launch/chain.py experiments/round4/<smoke config> stop --layout 1node
   A=old/<N>-$(date +%Y%m%d-%H%M%S); mkdir -p out/$A     # a new directory for every redo
-  mv out/<N>.chain.log out/runs/<S> out/exports/<smoke export> out/$A/; test ! -e out/<N>.mem.log || mv out/<N>.mem.log out/$A/
+  mv out/<N>.chain.log out/$A/; mv out/runs/<S> out/$A/runs-<S>; mv out/exports/<smoke export> out/$A/export-<smoke export>
+  test ! -e out/<N>.mem.log || mv out/<N>.mem.log out/$A/
   IMG=$(python3 -c "import tomllib; v = tomllib.load(open('env/versions.toml', 'rb'))['images']['nemo']; print(v['ref'] + '@' + v['digest'])")
   docker run --rm -v $PWD/out:/out --entrypoint sh $IMG -c "mv /out/train/<S> /out/$A/train-<S>; test ! -e /out/train/<S>.init || mv /out/train/<S>.init /out/$A/train-<S>.init"
   ```
