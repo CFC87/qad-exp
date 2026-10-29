@@ -1,0 +1,26 @@
+# Qwen3-30B-A3B, continuation of mix60b's run: 130 steps from mix60b stage 2's step-240 weights (mix60b-q30-s300 = 60
+# long-context + 240 mixed steps; a new optimizer and schedule), WSD decay over the last 25; the last step's weights exported
+# as mix60c-q30-s430. The list continues mix60_s1_q30's four portions past
+# every row it holds (customer service 60 steps, reasoning 30 with 10 % science, code 30, function calling 10; no long
+# context); native RoPE (window 40,960) and the environment of base_mt.toml. Learning rate, validation and optimizer
+# offload as mix60b's stage 2.
+include = "base_mt.toml"
+name = "mix60c-q30"
+export_prefix = "mix60c-q30"
+export_offset = 300
+init_from = "mix60b-q30-s240"           # mix60b's stage 2 (same --out)
+model = "Qwen3-30B-A3B"
+checkpoint = "Qwen3-30B-A3B-NVFP4"
+subset = "mix60c_q30_s20261027"
+rope = "plain"
+window = 40960
+budgets = [130]
+decays = [25]
+keep_weights = []
+lr = 1e-5
+min_lr = 1e-6
+val_n = 187
+expected_json = "train/configs/expected_bench_8b.json"   # Qwen3 family starting estimates; the controller corrects them online
+
+[optimizer_overrides]
+1node = { use_precision_aware_optimizer = true, optimizer_cpu_offload = true, optimizer_offload_fraction = 0.7, overlap_cpu_optimizer_d2h_h2d = true }

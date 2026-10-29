@@ -1,0 +1,48 @@
+{
+ "name": "mix60c_q30_s20261027",
+ "model": "Qwen3-30B-A3B",
+ "stage": "one run (native RoPE, window 40,960): reasoning, code, function calling, customer service, continuing from mix60b's stage-2 run on mix60_s1_q30_s20261023",
+ "description": "mix60c list for Qwen3-30B-A3B: the continuation of mix60_s1_q30_s20261023 (customer service 60 steps, reasoning and code 30, function calling 10, no long context)",
+ "train_ranks": [
+  0,
+  34250
+ ],
+ "val_ranks": [
+  34250,
+  34550
+ ],
+ "validation": "300 single-turn prompts shared by every list (ranks val_ranks)",
+ "length_col": "len_qwen3",
+ "steps_of_data": {
+  "reasoning": 30,
+  "code": 30,
+  "bfcl": 10,
+  "tau2": 60
+ },
+ "rows": {
+  "reasoning": 9528,
+  "code": 9900,
+  "bfcl": 4460,
+  "tau2": 7248
+ },
+ "buffer_rows": {
+  "reasoning": 953,
+  "code": 990,
+  "bfcl": 446,
+  "tau2": 725
+ },
+ "packed_tokens_target": {
+  "reasoning": 129920482,
+  "code": 129421068,
+  "bfcl": 38901007,
+  "tau2": 273766828
+ },
+ "packed_tokens_estimate": {
+  "reasoning": 129923990,
+  "code": 129424284,
+  "bfcl": 38905806,
+  "tau2": 273786741
+ },
+ "columns": "mix_domain (reasoning / code / bfcl / tau2 / val), mix_part (main / buffer), mix_src_rank (rank in its source list)",
+ "rule": "mix60c (Qwen3-30B-A3B): the continuation of mix60_s1_q30_s20261023 by the same method, each domain's selection continued in its own order past every row that list holds (main and buffer); no row of it comes back in the same domain except the science and function-calling rows below. Customer service 60 steps: the Qwen3 customer-service list in its rank order (customer-service and multi-turn function-calling conversations played end to end, with 10 % long math reasoning rows). Reasoning 30 steps: 90 % math, the math sequence continued, and 10 % science (by rows), taken again from mix60_s1_q30_s20261023's science rows in their order (the fixed science part is all in that list); the two spread evenly, the buffer math. Code 30 steps: infinibyte problems only, 70 % long / 30 % short by reference answer length (every hard original problem is already in mix60's list). Function calling 10 steps: first every long, deep row of mix60_s1_q30_s20261023's function-calling portion (prompt >= 16,000 tokens and >= 10 turns deep, the top length and depth bins of the list's selection), taken again in that list's order, then the Qwen3 function-calling list in its rank order past mix60's rows up to the portion's tokens; the portion in a seeded random order, the buffer the next rows of the list. No long context. Each domain is cut where it holds about the packed tokens of its steps for this model, estimated as for mix60_s1_q30_s20261023; the domains are interleaved so that every prefix holds the same fraction of each domain (row i of a domain with n rows at (i + 0.5) / n), then a 10 % buffer of further rows per domain."
+}

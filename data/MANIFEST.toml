@@ -1,6 +1,7 @@
 # Training data: GitHub release assets of this repository, fetched by `setup/setup.sh data`. An asset is fetched from
 # the release `release` names, its own `release` when it has one (data-v2: the round-4 lists; data-v3: the mix60 lists;
-# data-v4: the Qwen3-8B lists of mix60b-q8; data-v5: the mix60c list and its customer cards).
+# data-v4: the Qwen3-8B lists of mix60b-q8; data-v5: the mix60c list and its customer cards;
+# data-v6: the mix60c-q30 list and its customer cards).
 release = "data-v1"
 repo = "CFC87/qad-exp"
 # Each asset is checked against its sha256 and placed at `path`.
@@ -204,3 +205,38 @@ sha256 = "4027806348b6e8650ed0304b399d3598a031acb91fbb9f19b6ff9a789f20e829"
 release = "data-v5"
 path = "data/subsets/mix60c_cards_s20261027/customer_cards_alias_n3.parquet"
 sha256 = "102f4bb2ee3941d7108d6f0bf93707d21cf3de9b94a4dafd86f2f0fe97b2cc54"
+
+# mix60c-q30 (experiments/mix60c-q30): the Qwen3-30B-A3B continuation list and the customer cards its customer-service
+# conversations need beyond data-v5's: those of a Qwen3-8B continuation list (shared conversations) and its own (base_mt.toml
+# loads them in its order after mix60's and mix60c's cards)
+
+[assets."mix60c_q30_s20261027.parquet"]
+release = "data-v6"
+path = "data/subsets/mix60c_q30_s20261027/subset.parquet"
+sha256 = "7aec4eab67318caae602eae2acf5b816e721e12d0de9a2a4982287e2c498d111"
+# 136 MB
+
+[assets."mix60c_cards_s20261027.customer_cards_fill_q30.parquet"]
+release = "data-v6"
+path = "data/subsets/mix60c_cards_s20261027/customer_cards_fill_q30.parquet"
+sha256 = "65e6baf0ccecf760951e0ed8e109708f91114dff67b67bcaedda37a67e0c9aa1"
+
+[assets."mix60c_cards_s20261027.customer_cards_v3_q8.parquet"]
+release = "data-v6"
+path = "data/subsets/mix60c_cards_s20261027/customer_cards_v3_q8.parquet"
+sha256 = "a3c53b1e0ed8ed3be03f90711babc67062b639045c83e7bf917487f86cabe10a"
+
+[assets."mix60c_cards_s20261027.customer_cards_v3_q30.parquet"]
+release = "data-v6"
+path = "data/subsets/mix60c_cards_s20261027/customer_cards_v3_q30.parquet"
+sha256 = "6a413a7962f99799a5b703bfb32920f07c6588bad42bb6ef996e7de829796924"
+
+[assets."mix60c_cards_s20261027.customer_cards_alias_q8.parquet"]
+release = "data-v6"
+path = "data/subsets/mix60c_cards_s20261027/customer_cards_alias_q8.parquet"
+sha256 = "a937622a014d228a7b1bc58f63259add293c1b9cebf15378573f63ff5d8fde21"
+
+[assets."mix60c_cards_s20261027.customer_cards_alias_q30.parquet"]
+release = "data-v6"
+path = "data/subsets/mix60c_cards_s20261027/customer_cards_alias_q30.parquet"
+sha256 = "84cc0c59b3f45cccb20c4f30bfb1ca9bb94ca8371134a7403eb9f47b28722064"

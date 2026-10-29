@@ -40,7 +40,7 @@ python3 tools/check_env.py        # verify everything; writes reports/env_report
 `setup/setup.sh <step> ...` runs single steps:
 - `uv`, `images`, `sender`, `sources`, `venvs`: the tools, images, third-party code and Python environments;
 - `models`: the models;
-- `data`: the training lists, from this repository's releases `data-v1` to `data-v5`;
+- `data`: the training lists, from this repository's releases `data-v1` to `data-v6`;
 - `eval-data`: the evaluation files. The two gated sets are rebuilt with `HF_TOKEN`;
 - `judge`: the LiveCodeBench Pro judge image;
 - `optional-models`: Qwen3-30B-A3B and the two Nemotrons with their NVFP4 releases (needed by `experiments/round4` and
@@ -105,6 +105,8 @@ evaluation serves every model on single GPUs (tensor parallel 1).
   SFT traces, mixed KL and reverse KL, one run each.
 - [`experiments/mix60c`](experiments/mix60c/README.md): mix60's two Nemotron runs continued for 90 steps, each on a new
   list of its own (more code and customer service) with the updated customer-service environment.
+- [`experiments/mix60c-q30`](experiments/mix60c-q30/README.md): mix60b's Qwen3-30B-A3B run continued for 130 steps on
+  a new list (mostly customer service, then reasoning and code) with the updated customer-service environment.
 
 ## Evaluation
 
